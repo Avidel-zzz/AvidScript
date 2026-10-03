@@ -14,6 +14,19 @@ using AvidScript.WasmBackend;
 internal static class CSharpGuestCapabilityCliTests
 {
     private sealed record Profile(bool Static = false, bool Tokens = false, bool Void = false, bool Catch = false);
+    public static int RunGameplayCoverage()
+    {
+        int count = 0;
+        void Check(bool result, string message) { if (!result) throw new InvalidOperationException("Gameplay coverage: " + message); count++; }
+        foreach (bool statics in new[] { false, true })
+        foreach (bool tokens in new[] { false, true })
+        foreach (bool named in new[] { false, true })
+            Case(TaskSource(named, tokens, statics), $"gameplay-{statics}-{tokens}-{named}",
+                new(Static: statics, Tokens: tokens, Catch: named),
+                tokens ? statics ? named ? 54 : 57 : 53 : statics ? named ? 57 : 51 : named ? 52 : 50,
+                Check, fullOptions: true);
+        return count;
+    }
     public static int Run()
     {
         int count = 0;
@@ -57,7 +70,8 @@ internal static class CSharpGuestCapabilityCliTests
         + (statics ? "public static class Cache { public static int Value; static Cache() { Value = Script.Sync(7); } }" : "");
 
     private static void Case(string source, string name, Profile profile, int schema, Action<bool, string> check,
-        string? fixtureRoot = null, List<object>? fixtures = null, CSharpGuestAsyncVoidCompositionTests.Scenario? scenario = null)
+        string? fixtureRoot = null, List<object>? fixtures = null, CSharpGuestAsyncVoidCompositionTests.Scenario? scenario = null,
+        bool fullOptions = false)
     {
         string directory = Directory.CreateTempSubdirectory("AvidScript.CapabilityCli.").FullName;
         string[] files = { "source.cs", "facade.cs", "frontend.json", "semantic.json", "guest.json", "state.json", "debug.json" };
@@ -72,7 +86,8 @@ internal static class CSharpGuestCapabilityCliTests
             File.WriteAllBytes(PathOf("frontend.json"), frontendBytes);
             var semanticArgs = new List<string> { "--source", PathOf("source.cs"), "--source-id", sourceId,
                 "--frontend", PathOf("frontend.json"), "--output", PathOf("semantic.json"), "--executable-reference-source", PathOf("facade.cs") };
-            foreach (string option in Options(profile)) semanticArgs.AddRange(new[] { option, "enabled" });
+            var analysis = fullOptions ? new Profile(true, true, true, true) : profile;
+            foreach (string option in Options(analysis)) semanticArgs.AddRange(new[] { option, "enabled" });
             var workspace = new SemanticCompilerWorkspace();
             int semanticExit = SemanticCommandLine.Run(semanticArgs.ToArray(), workspace);
             // Supported exception-flow artifacts can carry source diagnostics;
@@ -83,8 +98,8 @@ internal static class CSharpGuestCapabilityCliTests
             var api = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256,
                 new[] { new SemanticReferenceSource(CSharpGuestCancellationTokenTests.AsyncFacade, "reference:0:facade.cs", true) },
                 workspace, enableAsyncExceptionFlow: true, enableDirectAwaitCleanup: true, enableAsyncCancellationFlow: true,
-                enableAsyncSynchronousExceptions: true, enableStaticInitialization: profile.Static,
-                enableAsyncCatchVariables: profile.Catch, enableCancellationTokens: profile.Tokens, enableAsyncVoidErrorOwner: profile.Void);
+                enableAsyncSynchronousExceptions: true, enableStaticInitialization: analysis.Static,
+                enableAsyncCatchVariables: analysis.Catch, enableCancellationTokens: analysis.Tokens, enableAsyncVoidErrorOwner: analysis.Void);
             check(semantic.SchemaVersion == schema && semanticBytes.SequenceEqual(SemanticSerializer.Serialize(api)), name + " exact API/CLI source bytes");
             check(CSharpLanguageCapabilityCompiler.TryLower(api, Hash(semanticBytes), out var apiModule, out var error)
                 && apiModule is not null, name + " API compiler: " + error);

@@ -6,6 +6,18 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--static-async-values")
+            {
+                int focused = CSharpGuestStaticAsyncValueTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.StaticAsyncValues: {focused}/{focused} passed");
+                return 0;
+            }
+            if (args.Length == 1 && args[0] == "--gameplay-profile-coverage")
+            {
+                int focused = CSharpGuestCapabilityCliTests.RunGameplayCoverage();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.GameplayProfileCoverage: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--capability-cli")
             {
                 int focused = CSharpGuestCapabilityCliTests.Run();
@@ -336,6 +348,8 @@ internal static class Program
                 + CSharpGuestReferenceTests.Run()
                 + CSharpGuestCliTests.Run()
                 + CSharpGuestCapabilityCliTests.Run()
+                + CSharpGuestCapabilityCliTests.RunGameplayCoverage()
+                + CSharpGuestStaticAsyncValueTests.Run()
                 + CSharpGuestStateSchemaTests.Run()
                 + CSharpGuestDebugMapTests.Run()
                 + CSharpGuestDebugResumableTests.Run()

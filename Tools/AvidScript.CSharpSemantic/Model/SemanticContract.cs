@@ -137,5 +137,7 @@ public static class SemanticContract
         || (schemaVersion == AsyncVoidErrorOwnerSchemaVersion
             && semanticVersion == AsyncVoidErrorOwnerSemanticVersion)
         || (schemaVersion == SemanticComposableCapabilities.AsyncVoidSchemaVersion
-            && semanticVersion == SemanticComposableCapabilities.AsyncVoidSemanticVersion);
+            && semanticVersion == SemanticComposableCapabilities.AsyncVoidSemanticVersion)
+        || (schemaVersion == SemanticComposableCapabilities.StaticAsyncValueSchemaVersion
+            && semanticVersion == SemanticComposableCapabilities.StaticAsyncValueSemanticVersion);
 }

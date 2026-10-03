@@ -13,6 +13,8 @@ public static class SemanticComposableCapabilities
     public const string SemanticVersion = "1.63";
     public const int AsyncVoidSchemaVersion = 56;
     public const string AsyncVoidSemanticVersion = "1.65";
+    public const int StaticAsyncValueSchemaVersion = 57;
+    public const string StaticAsyncValueSemanticVersion = "1.66";
     public const int SynchronousBaseSchemaVersion = SemanticContract.CurrentSchemaVersion;
     public const string SynchronousBaseSemanticVersion = SemanticContract.CurrentSemanticVersion;
     public const int AsyncBaseSchemaVersion = SemanticContract.AsyncSynchronousExceptionSchemaVersion;
@@ -28,9 +30,12 @@ public static class SemanticComposableCapabilities
     public static bool IsAsyncVoidVersion(SemanticDocument document) =>
         document.SchemaVersion == AsyncVoidSchemaVersion && document.SemanticVersion == AsyncVoidSemanticVersion;
 
+    public static bool IsStaticAsyncValueVersion(SemanticDocument document) =>
+        document.SchemaVersion == StaticAsyncValueSchemaVersion && document.SemanticVersion == StaticAsyncValueSemanticVersion;
+
     public static bool IsVersion(SemanticDocument document) =>
         document.SchemaVersion == SchemaVersion && document.SemanticVersion == SemanticVersion
-        || IsAsyncVoidVersion(document);
+        || IsAsyncVoidVersion(document) || IsStaticAsyncValueVersion(document);
 
     public static bool Has(SemanticDocument document, string id) =>
         IsVersion(document) && document.CapabilityManifest?.Capabilities?.Any(capability =>
@@ -53,9 +58,21 @@ public static class SemanticComposableCapabilities
         bool voidOwners = document.AsyncMethods.Any(method => method.VoidErrorOwner is not null);
         if (voidOwners) capabilities.Add(new(AsyncVoidOwner, 1));
         bool asynchronous = document.AsyncMethods.Count != 0;
+        bool staticAsyncValue = document.StaticInitialization is not null && !voidOwners
+            && !capabilities.Any(capability => capability.Id == CancellationTokenValue)
+            && document.AsyncMethods.Any(method => method.ExceptionPlan?.Catches
+                .Any(handler => handler.ExceptionVariableSymbolId is not null) == true);
+        bool staticTokenWithoutBinding = document.StaticInitialization is not null && !voidOwners
+            && capabilities.Any(capability => capability.Id == CancellationTokenValue)
+            && document.AsyncMethods.Count != 0 && !document.AsyncMethods.Any(method => method.ExceptionPlan?.Catches
+                .Any(handler => handler.ExceptionVariableSymbolId is not null) == true);
         return new(voidOwners ? SemanticContract.AsyncVoidErrorOwnerSchemaVersion
+                : staticAsyncValue ? SemanticContract.AsyncCatchVariableSchemaVersion
+                : staticTokenWithoutBinding ? SemanticContract.CancellationTokenSchemaVersion
                 : asynchronous ? AsyncBaseSchemaVersion : SynchronousBaseSchemaVersion,
             voidOwners ? SemanticContract.AsyncVoidErrorOwnerSemanticVersion
+                : staticAsyncValue ? SemanticContract.AsyncCatchVariableSemanticVersion
+                : staticTokenWithoutBinding ? SemanticContract.CancellationTokenSemanticVersion
                 : asynchronous ? AsyncBaseSemanticVersion : SynchronousBaseSemanticVersion,
             capabilities.OrderBy(capability => capability.Id, StringComparer.Ordinal).ToArray());
     }

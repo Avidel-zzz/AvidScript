@@ -94,13 +94,14 @@ internal static class SemanticAsyncCatchVariableTests
             "catch local referenced outside its region");
         foreach (var version in new[] { (50, "1.59"), (51, "1.60"), (52, "1.59"), (53, "1.62") })
             Reject(document with { SchemaVersion = version.Item1, SemanticVersion = version.Item2 }, "wrong or old version");
-        foreach (bool staticInitialization in new[] { false, true })
-        {
-            bool rejected = false;
-            try { Analyze(body, enabled: true, synchronous: staticInitialization, staticInitialization: staticInitialization); }
-            catch (ArgumentException) { rejected = true; }
-            Check(rejected, "Unsupported option composition fails explicitly");
-        }
+        bool rejected = false;
+        try { Analyze(body, enabled: true, synchronous: false); }
+        catch (ArgumentException) { rejected = true; }
+        Check(rejected, "Catch variables still require synchronous exception analysis");
+        var staticOptions = Analyze(body, enabled: true, synchronous: true, staticInitialization: true);
+        Check(staticOptions.SchemaVersion == 52 && staticOptions.CapabilityManifest is null
+            && staticOptions.StaticInitialization is null && SemanticAsyncCatchVariableValidator.IsValid(staticOptions),
+            "Enabling static analysis without static state does not invent a composition or token plan");
         return count;
     }
 

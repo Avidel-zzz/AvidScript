@@ -19,16 +19,17 @@ internal static class CSharpStaticSourcePreparation
             || SemanticComposableCapabilities.IsVersion(source) && source.AsyncMethods.Count != 0);
         bool voidSource = source is not null && SemanticComposableCapabilities.IsAsyncVoidVersion(source)
             && SemanticAsyncVoidErrorOwnerValidator.IsValid(source);
+        bool staticAsyncValueSource = source is not null && SemanticComposableCapabilities.IsStaticAsyncValueVersion(source);
         bool composedTokenSource = source is not null && SemanticComposableCapabilities.IsVersion(source)
             && SemanticContract.HasCancellationTokens(source)
             && SemanticCancellationTokenValidator.IsValid(source);
         if (source is null || !SemanticStaticInitializationValidator.IsValid(source)
-            || SemanticComposableCapabilities.IsVersion(source) && !composedTokenSource && !voidSource
+            || SemanticComposableCapabilities.IsVersion(source) && !composedTokenSource && !voidSource && !staticAsyncValueSource
             || !source.Succeeded && source.ExceptionFlows is null && !asyncSource
             || source.AsyncMethods.Count != 0 && !asyncSource
             || source.ExceptionFlows?.Any(flow => flow.Blocks is null) == true
             || source.RejectedAsyncExceptionFlows is not null || source.UeTypeDeclarations is not { Count: 0 })
-        { error = "Static source execution requires a validated Semantic 49/51 or composable Semantic 54 plan; generated UE routes are not connected yet."; return false; }
+        { error = "Static source execution requires a validated static initialization or source-backed composition plan; generated UE routes are not connected yet."; return false; }
         // The static envelope validates ownership and initializer plans. Reuse
         // the base reader for every ordinary callable, symbol and CFG invariant
         // before building dictionaries or specializing any source body.

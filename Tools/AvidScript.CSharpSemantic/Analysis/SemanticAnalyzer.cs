@@ -55,9 +55,8 @@ public static class SemanticAnalyzer
         if (enableAsyncSynchronousExceptions && !enableAsyncCancellationFlow)
             throw new ArgumentException("Synchronous async exceptions require cancellation analysis.",
                 nameof(enableAsyncSynchronousExceptions));
-        if (enableAsyncCatchVariables && (!enableAsyncSynchronousExceptions
-                || enableStaticInitialization && !enableCancellationTokens && !enableAsyncVoidErrorOwner))
-            throw new ArgumentException("Async catch variables require synchronous exception analysis; static composition requires cancellation token values.",
+        if (enableAsyncCatchVariables && !enableAsyncSynchronousExceptions)
+            throw new ArgumentException("Async catch variables require synchronous exception analysis.",
                 nameof(enableAsyncCatchVariables));
         if (enableCancellationTokens && !enableAsyncCatchVariables && !enableAsyncVoidErrorOwner)
             throw new ArgumentException("Cancellation token values require async catch variable analysis.",
@@ -375,6 +374,19 @@ public static class SemanticAnalyzer
             };
         }
         if (!enableStaticInitialization) return projected;
+        if (projected.StaticInitialization is not null && (catchVariables && !tokenValues
+            || tokenValues && !catchVariables && projected.AsyncMethods.Count != 0))
+        {
+            var catchManifest = SemanticComposableCapabilities.FromProjectedSource(projected);
+            return projected with {
+                SchemaVersion = SemanticComposableCapabilities.StaticAsyncValueSchemaVersion,
+                SemanticVersion = SemanticComposableCapabilities.StaticAsyncValueSemanticVersion,
+                StaticInitialization = projected.StaticInitialization with {
+                    BaseSchemaVersion = catchManifest.BaseSchemaVersion,
+                    BaseSemanticVersion = catchManifest.BaseSemanticVersion },
+                CapabilityManifest = catchManifest,
+            };
+        }
         if (!enableCancellationTokens || !tokenValues
             || projected.StaticInitialization is null) return projected;
         SemanticCapabilityManifest manifest = SemanticComposableCapabilities.FromProjectedSource(projected);

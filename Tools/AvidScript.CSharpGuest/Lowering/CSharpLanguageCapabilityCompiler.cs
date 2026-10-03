@@ -14,11 +14,11 @@ public static class CSharpLanguageCapabilityCompiler
         || source.SchemaVersion is SemanticContract.AsyncSynchronousExceptionSchemaVersion
             or SemanticContract.AsyncCatchVariableSchemaVersion or SemanticContract.CancellationTokenSchemaVersion
             or SemanticComposableCapabilities.SchemaVersion or SemanticContract.AsyncVoidErrorOwnerSchemaVersion
-            or SemanticComposableCapabilities.AsyncVoidSchemaVersion
+            or SemanticComposableCapabilities.AsyncVoidSchemaVersion or SemanticComposableCapabilities.StaticAsyncValueSchemaVersion
         || source.SemanticVersion is SemanticContract.AsyncSynchronousExceptionSemanticVersion
             or SemanticContract.AsyncCatchVariableSemanticVersion or SemanticContract.CancellationTokenSemanticVersion
             or SemanticComposableCapabilities.SemanticVersion or SemanticContract.AsyncVoidErrorOwnerSemanticVersion
-            or SemanticComposableCapabilities.AsyncVoidSemanticVersion;
+            or SemanticComposableCapabilities.AsyncVoidSemanticVersion or SemanticComposableCapabilities.StaticAsyncValueSemanticVersion;
 
     public static bool TryLower(SemanticDocument source, string semanticSha256,
         out GuestModule? module, out string? error)

@@ -14,19 +14,51 @@ public static class CSharpStaticInitializationCompiler
         module = null;
         if (!CSharpStaticSourcePreparation.TryPrepare(source, out var ordinary, out var execution, out error)) return false;
         bool voidComposition = SemanticComposableCapabilities.IsAsyncVoidVersion(source);
-        bool synchronousTokenComposition = !voidComposition && SemanticComposableCapabilities.IsVersion(source)
+        bool staticAsyncValueComposition = SemanticComposableCapabilities.IsStaticAsyncValueVersion(source);
+        bool synchronousTokenComposition = !voidComposition && !staticAsyncValueComposition && SemanticComposableCapabilities.IsVersion(source)
             && source.AsyncMethods.Count == 0;
-        bool asynchronousTokenComposition = !voidComposition && SemanticComposableCapabilities.IsVersion(source)
+        bool asynchronousTokenComposition = !voidComposition && !staticAsyncValueComposition && SemanticComposableCapabilities.IsVersion(source)
             && source.AsyncMethods.Count != 0;
         if (ordinary!.ExceptionFlows is not null
             || !synchronousTokenComposition && SemanticContract.HasAsyncSynchronousExceptions(ordinary))
         {
             if (!CSharpLanguageErrorCompiler.TryLower(ordinary, semanticSha256, out var compilation,
-                    out error, deferComposedValidation: asynchronousTokenComposition || voidComposition)) return false;
+                    out error, deferComposedValidation: asynchronousTokenComposition || voidComposition || staticAsyncValueComposition)) return false;
             GuestModule restored = compilation!.Module with { Provenance = compilation.Module.Provenance with
             { SemanticSchemaVersion = source.SchemaVersion, SemanticVersion = source.SemanticVersion } };
             if (voidComposition)
                 restored = CSharpAsyncVoidErrorLowerer.Wrap(source, restored);
+            else if (staticAsyncValueComposition)
+            {
+                bool tokenBase = source.CapabilityManifest!.BaseSchemaVersion == SemanticContract.CancellationTokenSchemaVersion;
+                if (restored is not { StaticStorage: { BaseSchemaVersion: 29, BaseIrVersion: "1.28" },
+                    CancellationIdentity: { BaseSchemaVersion: 30, BaseIrVersion: "1.29" },
+                    AsyncVoidErrorOwners: null }
+                    || (tokenBase
+                        ? restored is not { SchemaVersion: GuestCancellationTokens.SchemaVersion, IrVersion: GuestCancellationTokens.IrVersion,
+                            CancellationTokens: { BaseSchemaVersion: 29, BaseIrVersion: "1.28" } }
+                        : restored is not { SchemaVersion: GuestExceptionValues.SchemaVersion, IrVersion: GuestExceptionValues.IrVersion,
+                            ExceptionValues: { Bindings.Count: > 0 }, CancellationTokens: null }))
+                { error = "Static async value composition requires the complete source-backed execution plan chain."; return false; }
+                if (restored.DirectAwaitReadiness is not null
+                    && restored.DirectAwaitReadiness is not { BaseSchemaVersion: 30, BaseIrVersion: "1.29", Guards.Count: > 0 })
+                { error = "Static async value composition can carry only actual validated readiness guards."; return false; }
+                var catchCapabilities = new List<GuestCapability> {
+                    new(GuestComposableCapabilities.StaticStorage, 1),
+                    new(GuestComposableCapabilities.CancellationIdentity, 1) };
+                if (restored.ExceptionValues is not null) catchCapabilities.Add(new(GuestComposableCapabilities.ExceptionValues, 1));
+                if (restored.CancellationTokens is not null) catchCapabilities.Add(new(GuestComposableCapabilities.CancellationTokenValue, 1));
+                if (restored.DirectAwaitReadiness is not null) catchCapabilities.Add(new(GuestComposableCapabilities.AwaitReadiness, 1));
+                restored = restored with {
+                    SchemaVersion = GuestComposableCapabilities.StaticAsyncValueSchemaVersion,
+                    IrVersion = GuestComposableCapabilities.StaticAsyncValueIrVersion,
+                    DirectAwaitReadiness = restored.DirectAwaitReadiness is { } catchReady
+                        ? catchReady with { BaseSchemaVersion = 29, BaseIrVersion = "1.28" } : null,
+                    CancellationIdentity = restored.CancellationIdentity with { BaseSchemaVersion = 29, BaseIrVersion = "1.28" },
+                    CapabilityManifest = GuestCapabilityManifest.Create(29, "1.28", catchCapabilities),
+                    StaticAsyncValueComposition = new(source.CapabilityManifest.BaseSchemaVersion, source.CapabilityManifest.BaseSemanticVersion),
+                };
+            }
             else if (asynchronousTokenComposition)
             {
                 // The legacy wrappers were built around IR 30. IR 35 declares

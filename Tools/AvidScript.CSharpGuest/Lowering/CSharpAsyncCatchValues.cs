@@ -57,9 +57,12 @@ internal static class CSharpAsyncCatchValues
             SemanticSchemaVersion = GuestAsyncSynchronousExceptions.SemanticSchemaVersion,
             SemanticVersion = GuestAsyncSynchronousExceptions.SemanticVersion } };
         var tokenContext = CSharpCancellationTokenExecutionContext.Find(source);
+        var staticContext = CSharpStaticExecutionContext.Find(source);
         GuestModule? upgraded;
         if (!(asyncContext is { HasVoidErrorOwners: true }
             ? CSharpCancellationIdentityCompiler.TryUpgradeForVoidOwners(asyncContext, execution, out upgraded, out error)
+            : staticContext is not null && tokenContext is null
+            ? CSharpCancellationIdentityCompiler.TryUpgradeForStaticAsyncValue(staticContext, execution, out upgraded, out error)
             : tokenContext is null
             ? CSharpCancellationIdentityCompiler.TryUpgrade(execution, out upgraded, out error)
             : CSharpCancellationIdentityCompiler.TryUpgradeForTokens(tokenContext, execution, out upgraded, out error))) return false;

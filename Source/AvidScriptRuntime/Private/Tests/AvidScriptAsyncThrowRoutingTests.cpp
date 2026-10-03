@@ -31,6 +31,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptStaticAsyncTest,
     "AvidScript.Runtime.Continuation.CompiledStaticAsync",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptStaticAsyncValueTest,
+    "AvidScript.Runtime.Continuation.CompiledStaticAsyncValues",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptOriginalAsyncMemberTest,
     "AvidScript.Runtime.Continuation.CompiledOriginalAsyncMember",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -56,7 +60,7 @@ namespace AvidScript::Tests::CompiledAsyncExceptions
 static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 ExpectedScenarios, const TCHAR* LogPrefix,
     bool CollectWhileSuspended = false, bool HasStaticStorage = false, int32 ExpectedObservations = 0,
     int32 ExpectedResumeObservations = 0, bool ObserveOriginalTasks = false, bool TokenValues = false,
-    bool ProbeToken = false)
+    bool ProbeToken = false, bool StaticAsyncValues = false)
 {
     if (!GEngine) return false;
     const FString Directory = FPlatformMisc::GetEnvironmentVariable(FixtureVariable);
@@ -99,6 +103,16 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
             int32 StaticSlots = 0;
             if (HasStaticStorage && !Test.TestTrue(TEXT("Static fixture declares bounded domain roots"),
                 (*Scenario)->TryGetNumberField(TEXT("staticSlots"), StaticSlots) && StaticSlots > 0 && StaticSlots <= 4096)) return false;
+            int32 LiveStaticObjects[3] = {};
+            if (StaticAsyncValues)
+            {
+                const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
+                if (!Test.TestTrue(TEXT("Static value fixture declares exact objects for each lifetime mode"),
+                    (*Scenario)->TryGetArrayField(TEXT("liveStaticObjects"), Entries) && Entries && Entries->Num() == 3)) return false;
+                for (int32 Index = 0; Index < 3; ++Index)
+                    if (!Test.TestTrue(TEXT("Bounded actual static object count"), (*Entries)[Index]->TryGetNumber(LiveStaticObjects[Index])
+                        && LiveStaticObjects[Index] >= 0 && LiveStaticObjects[Index] <= 4096)) return false;
+            }
             struct FObservation { FString Name; int32 Offset = -1; int32 Expected = 0; };
             TArray<FObservation> Observations, ResumeObservations;
             auto ReadObservations = [&](const TCHAR* Field, int32 Count, TArray<FObservation>& Output) -> bool {
@@ -279,13 +293,19 @@ static bool Run(FAutomationTestBase& Test, const TCHAR* FixtureVariable, int32 E
                     Test.TestEqual(*(Label + TEXT(" cancellation sources before teardown")),
                         Owner->GetCancellationSourceCountForTesting(), ExpectedLiveSources);
                 }
+                if (StaticAsyncValues)
+                    Test.TestEqual(*(Label + TEXT(" cancellation sources before teardown")), Owner->GetCancellationSourceCountForTesting(), 0);
                 if (auto* Heap = Runtime.GetManagedHeapForTesting())
                 {
                     Test.TestEqual(*(Label + TEXT(" domain roots")), Heap->GetStats().StaticRoots, static_cast<uint32>(StaticSlots));
-                    Test.TestEqual(*(Label + TEXT(" roots")), Heap->GetStats().LiveRoots, static_cast<uint32>(StaticSlots));
+                    Test.TestEqual(*(Label + TEXT(" roots")), Heap->GetStats().LiveRoots,
+                        static_cast<uint32>(StaticSlots));
                     Test.TestEqual(*(Label + TEXT(" heap frames")), Heap->GetStats().ActiveFrames, static_cast<uint32>(0));
                     Test.TestEqual(*Label, Heap->Collect(), AvidScript::Managed::EHeapError::Ok);
-                    if (!HasStaticStorage)
+                    if (StaticAsyncValues)
+                        Test.TestEqual(*(Label + TEXT(" static objects")), Heap->GetStats().LiveObjects,
+                            static_cast<uint32>(LiveStaticObjects[Stopped ? Mode : 0]));
+                    else if (!HasStaticStorage)
                         Test.TestEqual(*(Label + TEXT(" objects")), Heap->GetStats().LiveObjects, static_cast<uint32>(0));
                 }
                 ++Cases;
@@ -337,6 +357,12 @@ bool FAvidScriptStaticAsyncTest::RunTest(const FString& Parameters)
 {
     return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
         TEXT("AVIDSCRIPT_STATIC_ASYNC_FIXTURE_DIR"), 37, TEXT("static-async"), true, true);
+}
+
+bool FAvidScriptStaticAsyncValueTest::RunTest(const FString& Parameters)
+{
+    return AvidScript::Tests::CompiledAsyncExceptions::Run(*this,
+        TEXT("AVIDSCRIPT_STATIC_ASYNC_VALUE_FIXTURE_DIR"), 16, TEXT("static-async-value"), true, true, 0, 0, false, false, false, true);
 }
 
 bool FAvidScriptOriginalAsyncMemberTest::RunTest(const FString& Parameters)

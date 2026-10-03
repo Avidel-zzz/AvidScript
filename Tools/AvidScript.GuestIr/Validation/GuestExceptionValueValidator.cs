@@ -12,6 +12,8 @@ internal static class GuestExceptionValueValidator
         bool composableAsync = GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact);
         bool reserved = artifact.Functions.SelectMany(function => function.Locals)
             .Any(local => local.Id.StartsWith(GuestExceptionValues.CapturePrefix, StringComparison.Ordinal));
+        if (GuestComposableCapabilities.IsStaticAsyncValueVersion(artifact)
+            && artifact.ExceptionValues is null && !reserved) return;
         if (GuestAsyncVoidErrorOwners.IsVersion(artifact) && artifact.ExceptionValues is null && !reserved) return;
         if (!GuestExceptionValues.IsVersion(artifact) && !composableAsync)
         {

@@ -4,18 +4,24 @@ param(
     [string]$DotNetPath = (Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'),
     [switch]$SkipBuild,
     [switch]$Composition,
-    [switch]$PublicCli
+    [switch]$PublicCli,
+    [switch]$StaticAsyncValues
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($StaticAsyncValues -and ($PublicCli -or $Composition)) { throw 'Select one composition fixture family.' }
 $pluginRoot = Split-Path -Parent $PSScriptRoot
 $projectRoot = Split-Path -Parent (Split-Path -Parent $pluginRoot)
 $projectPath = Join-Path $projectRoot 'AvidTPSTemplate.uproject'
-$runRoot = Join-Path $projectRoot ('Saved/AvidScriptAsyncVoidOwners/' + [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ') + '-' + [Guid]::NewGuid().ToString('N'))
+$family = if ($StaticAsyncValues) { 'AvidScriptStaticAsyncValues' } else { 'AvidScriptAsyncVoidOwners' }
+$label = if ($StaticAsyncValues) { 'Static async values' } else { 'Async void owners' }
+$expectedFixtureCount = if ($StaticAsyncValues) { 65 } else { 97 }
+$expectedVmCases = if ($StaticAsyncValues) { 96 } else { 192 }
+$runRoot = Join-Path $projectRoot ('Saved/' + $family + '/' + [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ') + '-' + [Guid]::NewGuid().ToString('N'))
 $fixtureRoot = [IO.Path]::GetFullPath((Join-Path $runRoot 'Fixtures'))
 $null = New-Item -ItemType Directory -Path $fixtureRoot
-$environmentNames = @('DOTNET_CLI_HOME', 'AVIDSCRIPT_ASYNC_VOID_OWNER_FIXTURE_DIR', 'DOTNET_GENERATE_ASPNET_CERTIFICATE',
+$environmentNames = @('DOTNET_CLI_HOME', 'AVIDSCRIPT_ASYNC_VOID_OWNER_FIXTURE_DIR', 'AVIDSCRIPT_STATIC_ASYNC_VALUE_FIXTURE_DIR', 'DOTNET_GENERATE_ASPNET_CERTIFICATE',
     'DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK', 'DOTNET_ADD_GLOBAL_TOOLS_TO_PATH', 'DOTNET_NOLOGO',
     'DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE', 'DOTNET_CLI_TELEMETRY_OPTOUT',
     'MSBUILDDISABLENODEREUSE', 'DOTNET_CLI_USE_MSBUILD_SERVER', 'UseSharedCompilation')
@@ -41,15 +47,16 @@ try {
     $env:DOTNET_CLI_USE_MSBUILD_SERVER = '0'
     $env:UseSharedCompilation = 'false'
     $env:DOTNET_CLI_HOME = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AvidScript/Toolchain/AsyncVoidOwners'
-    $env:AVIDSCRIPT_ASYNC_VOID_OWNER_FIXTURE_DIR = $fixtureRoot
+    if ($StaticAsyncValues) { $env:AVIDSCRIPT_STATIC_ASYNC_VALUE_FIXTURE_DIR = $fixtureRoot }
+    else { $env:AVIDSCRIPT_ASYNC_VOID_OWNER_FIXTURE_DIR = $fixtureRoot }
     $sdk = & $DotNetPath --version
     if ($LASTEXITCODE -ne 0 -or $sdk -cne '8.0.416') { throw "Expected installed SDK 8.0.416, got $sdk" }
     $testProject = 'Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.Tests.csproj'
     & $DotNetPath build $testProject -c Release --no-restore --disable-build-servers -m:1 -nodeReuse:false `
         -p:UseSharedCompilation=false --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw 'Single-node managed build failed. No SDK or workload installation was attempted.' }
-    $managedArgument = if ($PublicCli) { '--capability-cli' } elseif ($Composition) { '--async-void-composition' } else { '--async-void-error-owners' }
-    $managedLabel = if ($PublicCli) { 'CapabilityCli' } elseif ($Composition) { 'AsyncVoidComposition' } else { 'AsyncVoidErrorOwners' }
+    $managedArgument = if ($StaticAsyncValues) { '--static-async-values' } elseif ($PublicCli) { '--capability-cli' } elseif ($Composition) { '--async-void-composition' } else { '--async-void-error-owners' }
+    $managedLabel = if ($StaticAsyncValues) { 'StaticAsyncValues' } elseif ($PublicCli) { 'CapabilityCli' } elseif ($Composition) { 'AsyncVoidComposition' } else { 'AsyncVoidErrorOwners' }
     $managed = @(& $DotNetPath run --project $testProject -c Release --no-build --no-restore -- $managedArgument)
     $managedExit = $LASTEXITCODE
     $managed | Set-Content -LiteralPath (Join-Path $runRoot 'managed.log') -Encoding utf8
@@ -61,7 +68,7 @@ try {
         [ordered]@{ name = $_.Name; bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     })
     $ownedFixtures | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'fixture-hashes.json') -Encoding utf8
-    if ($ownedFixtures.Count -ne 97) { throw "Expected 24 source/semantic/IR/WASM fixtures and one manifest, got $($ownedFixtures.Count)." }
+    if ($ownedFixtures.Count -ne $expectedFixtureCount) { throw "Expected $expectedFixtureCount owned source/semantic/IR/WASM files, got $($ownedFixtures.Count)." }
     if (-not $SkipBuild) {
         # Use the already-built UBT. Build.bat can rebuild UBT with unbounded
         # MSBuild; this probe neither bootstraps an engine nor installs its SDK.
@@ -78,7 +85,14 @@ try {
         finally { Pop-Location }
         if ($LASTEXITCODE -ne 0) { throw 'No-clean single-action Win64 Editor build failed.' }
     }
-    $tests = @(
+    $tests = if ($StaticAsyncValues) { @(
+        'AvidScript.Runtime.Continuation.CompiledStaticAsyncValues'
+        'AvidScript.Runtime.LanguageErrorCatalog.StaticAsyncValueAdmission'
+        'AvidScript.Runtime.LanguageErrorCatalog.AsyncVoidAdmission'
+        'AvidScript.Runtime.LanguageErrorCatalog.AsyncVoidCompositionAdmission'
+        'AvidScript.Runtime.LanguageErrorCatalog.LoadAndReject'
+        'AvidScript.Runtime.LanguageErrorCatalog.TaskFaultVmImport'
+    ) } else { @(
         'AvidScript.Runtime.Continuation.CompiledAsyncVoidErrorOwners'
         'AvidScript.Runtime.LanguageErrorCatalog.AsyncVoidAdmission'
         'AvidScript.Runtime.LanguageErrorCatalog.AsyncVoidCompositionAdmission'
@@ -88,14 +102,14 @@ try {
         'AvidScript.Runtime.GeneratedTypes.SharedRuntimeContext'
         'AvidScript.Runtime.GeneratedTypes.SharedRuntimeCallbacks'
         'AvidScript.Runtime.GeneratedTypes.SharedInstanceLifecycle'
-    )
+    ) }
     $filter = $tests -join '+'
     $logPath = Join-Path $runRoot 'automation.log'
     & (Join-Path $EngineRoot 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe') $projectPath `
         -unattended -nop4 -NullRHI -nosplash -Multiprocess "-ExecCmds=Automation RunTests $filter;Quit" `
         '-TestExit=Automation Test Queue Empty' "-abslog=$logPath"
     $editorExit = $LASTEXITCODE
-    if ($editorExit -ne 0) { throw "Async void Automation failed (exit $editorExit): $logPath" }
+    if ($editorExit -ne 0) { throw "$label Automation failed (exit $editorExit): $logPath" }
     $log = Get-Content -LiteralPath $logPath -Raw
     $passed = 0
     foreach ($test in $tests) {
@@ -104,12 +118,14 @@ try {
             '\} Path=\{' + [regex]::Escape($test) + '\}'
         if ([regex]::Matches($log, $pattern).Count -eq 1) { $passed++ }
     }
-    $cases = [regex]::Matches($log, 'async-void-owner backend=\d+ scenario=[a-z-]+ mode=\d+ fault=[01] trace=-?\d+ resumes=\d+').Count
-    if ($passed -ne $tests.Count -or $cases -ne 192 -or
+    $casePattern = if ($StaticAsyncValues) { 'static-async-value backend=\d+ scenario=[a-z-]+ mode=\d+ result=-?\d+ trace=-?\d+ resumes=\d+' }
+        else { 'async-void-owner backend=\d+ scenario=[a-z-]+ mode=\d+ fault=[01] trace=-?\d+ resumes=\d+' }
+    $cases = [regex]::Matches($log, $casePattern).Count
+    if ($passed -ne $tests.Count -or $cases -ne $expectedVmCases -or
         [regex]::Matches($log, 'Test Completed\. Result=\{Fail\}').Count -ne 0 -or
         [regex]::Matches($log, '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*').Count -ne 1 -or
         [regex]::Matches($log, "Found $($tests.Count) automation tests based on '$([regex]::Escape($filter))'").Count -ne 1) {
-        throw "Async void evidence incomplete: tests=$passed/$($tests.Count) cases=$cases/192 log=$logPath"
+        throw "$label evidence incomplete: tests=$passed/$($tests.Count) cases=$cases/$expectedVmCases log=$logPath"
     }
     if ($userPathBefore -cne [Environment]::GetEnvironmentVariable('Path', 'User') -or
         $machinePathBefore -cne [Environment]::GetEnvironmentVariable('Path', 'Machine')) {
@@ -117,8 +133,8 @@ try {
     }
     [ordered]@{
         schema_version = 1
-        semantic_version = $(if ($Composition -or $PublicCli) { '56/1.65' } else { '55/1.64' })
-        guest_ir_version = $(if ($Composition -or $PublicCli) { '37/1.36' } else { '36/1.35' })
+        semantic_version = $(if ($StaticAsyncValues) { '57/1.66' } elseif ($Composition -or $PublicCli) { '56/1.65' } else { '55/1.64' })
+        guest_ir_version = $(if ($StaticAsyncValues) { '38/1.37' } elseif ($Composition -or $PublicCli) { '37/1.36' } else { '36/1.35' })
         source_entry = $(if ($PublicCli) { 'public-cli' } else { 'compiler-api' })
         sdk = $sdk
         managed_passed = [int]$match.Groups[1].Value
@@ -131,7 +147,7 @@ try {
         automation_log = 'automation.log'
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot 'results.json') -Encoding utf8
     $succeeded = $true
-    Write-Output "Async void owners: managed=$($match.Groups[1].Value)/$($match.Groups[2].Value), native=$passed/$($tests.Count), Wasmtime/WAMR=$cases/192; evidence=$runRoot"
+    Write-Output "$label`: managed=$($match.Groups[1].Value)/$($match.Groups[2].Value), native=$passed/$($tests.Count), Wasmtime/WAMR=$cases/$expectedVmCases; evidence=$runRoot"
 }
 finally {
     try {

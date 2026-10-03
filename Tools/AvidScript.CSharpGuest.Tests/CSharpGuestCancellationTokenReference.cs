@@ -12,6 +12,9 @@ internal static class CSharpGuestCancellationTokenReference
     // Business source is identical. Only the UE scheduler/source facade is
     // replaced with BCL Tasks and CancellationTokenSource for the CLR oracle.
     internal static int Execute(string source, bool asynchronous)
+        => ExecuteState(source, asynchronous).Result;
+
+    internal static (int Result, int Trace) ExecuteState(string source, bool asynchronous)
     {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
             .Select(path => MetadataReference.CreateFromFile(path));
@@ -28,13 +31,14 @@ internal static class CSharpGuestCancellationTokenReference
             SynchronizationContext.SetSynchronizationContext(null);
             var assembly = context.LoadFromStream(bytes);
             var script = assembly.GetType("Script")!;
-            if (!asynchronous) return (int)script.GetMethod("Main")!.Invoke(null, null)!;
+            int Trace() => (int?)script.GetField("Trace")?.GetValue(null) ?? 0;
+            if (!asynchronous) return ((int)script.GetMethod("Main")!.Invoke(null, null)!, Trace());
             var step = assembly.GetType("AvidScript.AvidContinuations")!.GetMethod("Step")!;
             var task = (Task<int>)script.GetMethod("Run")!.Invoke(null, null)!;
             for (int tick = 0; !task.IsCompleted && tick < 256; tick++)
                 if (!(bool)step.Invoke(null, null)!) throw new InvalidOperationException("Token reference stalled without a pending tick.");
             if (!task.IsCompleted) throw new InvalidOperationException("Token reference exceeded its tick budget.");
-            return task.GetAwaiter().GetResult();
+            return (task.GetAwaiter().GetResult(), Trace());
         } finally {
             SynchronizationContext.SetSynchronizationContext(previous);
             context.Unload();

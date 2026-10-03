@@ -10,6 +10,13 @@ public static class GuestComposableCapabilities
 {
     public const int SchemaVersion = 35;
     public const string IrVersion = "1.34";
+    public const int StaticAsyncValueSchemaVersion = 38;
+    public const string StaticAsyncValueIrVersion = "1.37";
+    public const int StaticAsyncValueSemanticSchemaVersion = 57;
+    public const string StaticAsyncValueSemanticVersion = "1.66";
+
+    public static bool IsStaticAsyncValueVersion(GuestModule module) =>
+        module.SchemaVersion == StaticAsyncValueSchemaVersion && module.IrVersion == StaticAsyncValueIrVersion;
 
     public const string StaticStorage = "managed.static_storage";
     public const string AwaitReadiness = "async.await_readiness";
@@ -19,14 +26,16 @@ public static class GuestComposableCapabilities
 
     public static bool IsVersion(GuestModule module) =>
         module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion
-        || GuestAsyncVoidErrorOwners.IsVersion(module);
+        || GuestAsyncVoidErrorOwners.IsVersion(module) || IsStaticAsyncValueVersion(module);
 
     public static int ExpectedSemanticSchema(GuestModule module) =>
-        GuestAsyncVoidErrorOwners.IsCompositionVersion(module) ? GuestAsyncVoidErrorOwners.CompositionSemanticSchemaVersion
+        IsStaticAsyncValueVersion(module) ? StaticAsyncValueSemanticSchemaVersion
+            : GuestAsyncVoidErrorOwners.IsCompositionVersion(module) ? GuestAsyncVoidErrorOwners.CompositionSemanticSchemaVersion
             : GuestAsyncVoidErrorOwners.IsVersion(module) ? GuestAsyncVoidErrorOwners.SemanticSchemaVersion : 54;
 
     public static string ExpectedSemanticVersion(GuestModule module) =>
-        GuestAsyncVoidErrorOwners.IsCompositionVersion(module) ? GuestAsyncVoidErrorOwners.CompositionSemanticVersion
+        IsStaticAsyncValueVersion(module) ? StaticAsyncValueSemanticVersion
+            : GuestAsyncVoidErrorOwners.IsCompositionVersion(module) ? GuestAsyncVoidErrorOwners.CompositionSemanticVersion
             : GuestAsyncVoidErrorOwners.IsVersion(module) ? GuestAsyncVoidErrorOwners.SemanticVersion : "1.63";
 
     public static bool Has(GuestModule module, string capabilityId) =>
@@ -45,7 +54,20 @@ public static class GuestComposableCapabilities
         && module.Language == "csharp"
         && module.Provenance.SemanticSchemaVersion == ExpectedSemanticSchema(module)
         && module.Provenance.SemanticVersion == ExpectedSemanticVersion(module)
-        && (GuestAsyncVoidErrorOwners.IsVersion(module)
+        && (IsStaticAsyncValueVersion(module)
+            ? Has(module, StaticStorage)
+                && Has(module, CancellationIdentity)
+                && module.StaticStorage is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
+                && (module.DirectAwaitReadiness is null
+                    || module.DirectAwaitReadiness is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" })
+                && Has(module, AwaitReadiness) == (module.DirectAwaitReadiness is not null)
+                && module.CancellationIdentity is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
+                && (module.StaticAsyncValueComposition is { SourceBaseSchemaVersion: 52, SourceBaseSemanticVersion: "1.61" }
+                    ? Has(module, ExceptionValues) && module.ExceptionValues is not null && module.CancellationTokens is null
+                    : module.StaticAsyncValueComposition is { SourceBaseSchemaVersion: 53, SourceBaseSemanticVersion: "1.62" }
+                        && Has(module, CancellationTokenValue) && module.CancellationTokens is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" })
+                && module.AsyncVoidErrorOwners is null
+            : GuestAsyncVoidErrorOwners.IsVersion(module)
             ? Has(module, GuestAsyncVoidErrorOwners.CapabilityId) && module.AsyncVoidErrorOwners is not null
             : Has(module, StaticStorage) && Has(module, AwaitReadiness)
         && Has(module, CancellationIdentity) && Has(module, ExceptionValues)
@@ -81,3 +103,8 @@ public sealed record GuestCapabilityManifest(
 public sealed record GuestCapability(
     [property: JsonPropertyOrder(0), JsonRequired] string Id,
     [property: JsonPropertyOrder(1), JsonRequired] int Version);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record GuestStaticAsyncValueCompositionPlan(
+    [property: JsonPropertyOrder(0), JsonRequired] int SourceBaseSchemaVersion,
+    [property: JsonPropertyOrder(1), JsonRequired] string SourceBaseSemanticVersion);

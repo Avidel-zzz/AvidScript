@@ -104,7 +104,29 @@ internal static class CSharpOperationLowerer
             return Malformed(context, operation, blockOrdinal);
         }
 
-        return LowerValue(context, operation.Children[0], blockOrdinal, instructions);
+        SemanticOperation child = operation.Children[0];
+        GuestRegister? value = LowerValue(context, child, blockOrdinal, instructions);
+        return operation.Kind == "expression_statement" && value is not null
+            ? ReleaseDiscardedTask(context, child, value, blockOrdinal, instructions)
+            : value;
+    }
+
+    private static GuestRegister? ReleaseDiscardedTask(
+        CSharpFunctionLoweringContext context, SemanticOperation operation, GuestRegister value,
+        int blockOrdinal, List<GuestInstruction> instructions)
+    {
+        while (operation.Kind is "parenthesized" or "conversion" && operation.Children.Count == 1)
+            operation = operation.Children[0];
+        // Only an invocation of a source Task<int> producer transfers a caller lease.
+        // An assignment or a reference still belongs to its local/field owner.
+        if (operation.Kind != "invocation" || !CSharpTaskResultAbi.Supports(context.Document)
+            || !context.Document.AsyncMethods.Any(method => method.MethodSymbolId == operation.SymbolId
+                && method.TaskResultTypeId == CSharpTaskResultAbi.IntTypeId)) return value;
+        GuestRegister? token = context.CreateTemporary(CSharpTaskResultAbi.TokenTypeId, blockOrdinal);
+        if (token is null) return null;
+        instructions.Add(new("convert", token.Id, new[] { value.Id }, null, null, null));
+        return CSharpTaskResultAbi.Call(context, CSharpTaskResultAbi.Release, token, null,
+            blockOrdinal, instructions) is null ? null : value;
     }
 
     private static GuestRegister? LowerArrayElementLoad(
@@ -332,9 +354,10 @@ internal static class CSharpOperationLowerer
         }
 
         GuestRegister? value = LowerValue(context, operation.Children[1], blockOrdinal, instructions);
-        if (value is null || target.Kind == "discard")
+        if (value is null) return null;
+        if (target.Kind == "discard")
         {
-            return value;
+            return ReleaseDiscardedTask(context, operation.Children[1], value, blockOrdinal, instructions);
         }
 
         return StoreValue(context, target, value, blockOrdinal, instructions)

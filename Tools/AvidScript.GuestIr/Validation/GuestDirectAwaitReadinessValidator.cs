@@ -21,8 +21,15 @@ internal static class GuestDirectAwaitReadinessValidator
                 Add(context, "Direct await readiness requires Guest IR 31/1.30.");
             return;
         }
-        if ((identity || GuestAsyncVoidErrorOwners.IsVersion(artifact))
-            && artifact.DirectAwaitReadiness is null && queryImports.Length == 0) return;
+        if ((identity || GuestAsyncVoidErrorOwners.IsVersion(artifact)
+                || GuestComposableCapabilities.IsStaticAsyncValueVersion(artifact))
+            && artifact.DirectAwaitReadiness is null && queryImports.Length == 0)
+        {
+            if (GuestComposableCapabilities.IsStaticAsyncValueVersion(artifact)
+                && artifact.Functions.SelectMany(function => function.Blocks).Any(block => block.Instructions.Any(instruction => IsBinding(context, instruction))))
+                Add(context, "A source-bound cancellation await cannot erase its readiness guards.");
+            return;
+        }
         if (artifact.DirectAwaitReadiness is not { Guards.Count: > 0 and <= 4096 } plan
             || !GuestDirectAwaitReadiness.IsBase(plan.BaseSchemaVersion, plan.BaseIrVersion)
             || identity && (artifact.CancellationIdentity is null || artifact.CancellationIdentity.BaseSchemaVersion != plan.BaseSchemaVersion

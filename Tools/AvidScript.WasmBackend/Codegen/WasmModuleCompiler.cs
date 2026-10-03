@@ -228,6 +228,8 @@ public static class WasmModuleCompiler
                 payload += "\ntask_local_exception_model=" + lifetimes.ExceptionModel;
             if (GuestAsyncVoidErrorOwners.IsCompositionVersion(module) && module.AsyncVoidComposition is { } composition)
                 payload += $"\nsource_execution={composition.SourceBaseSchemaVersion}/{composition.SourceBaseSemanticVersion}";
+            if (GuestComposableCapabilities.IsStaticAsyncValueVersion(module) && module.StaticAsyncValueComposition is { } staticValues)
+                payload += $"\nsource_execution={staticValues.SourceBaseSchemaVersion}/{staticValues.SourceBaseSemanticVersion}";
             if (GuestComposableCapabilities.IsVersion(module) && module.CapabilityManifest is { } manifest)
             {
                 payload += $"\nexecution_base={manifest.ExecutionBaseSchemaVersion}/{manifest.ExecutionBaseIrVersion}";

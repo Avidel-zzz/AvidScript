@@ -11,7 +11,10 @@ internal static class GuestComposableCapabilityValidator
     {
         GuestModule module = context.InputArtifact;
         bool voidOwners = GuestAsyncVoidErrorOwners.IsVersion(module);
+        bool staticAsyncValue = GuestComposableCapabilities.IsStaticAsyncValueVersion(module);
         GuestCapabilityManifest? manifest = module.CapabilityManifest;
+        if (!staticAsyncValue && module.StaticAsyncValueComposition is not null)
+            Add("Static async value composition cannot authorize another artifact version.");
         if (!GuestComposableCapabilities.IsVersion(module))
         {
             if (manifest is not null)
@@ -89,7 +92,7 @@ internal static class GuestComposableCapabilityValidator
             || declared.Contains(GuestComposableCapabilities.CancellationIdentity)
             || declared.Contains(GuestComposableCapabilities.ExceptionValues)))
             Add("Async readiness, cancellation identity, and exception values require base 29/1.28.");
-        if (!voidOwners && declared.Contains(GuestComposableCapabilities.CancellationIdentity)
+        if (!voidOwners && !staticAsyncValue && declared.Contains(GuestComposableCapabilities.CancellationIdentity)
             && !declared.Contains(GuestComposableCapabilities.AwaitReadiness))
             Add("Cancellation identity requires await readiness.");
 
@@ -98,7 +101,10 @@ internal static class GuestComposableCapabilityValidator
             && declared.Contains(GuestComposableCapabilities.StaticStorage)
             && declared.Contains(GuestComposableCapabilities.CancellationTokenValue);
         bool asynchronousProfile = GuestComposableCapabilities.HasDeclaredAsyncBase29(module)
-            && (voidOwners || declared.Count == 5);
+            && (voidOwners || (staticAsyncValue ? declared.Count is >= 3 and <= 5 : declared.Count == 5));
+        if (staticAsyncValue && (module.Language != "csharp" || module.AsyncVoidComposition is not null
+            || declared.Contains(GuestAsyncVoidErrorOwners.CapabilityId)))
+            Add("IR38 requires its source-backed static/async value composition without async void plans.");
         if (voidOwners ? !asynchronousProfile : !synchronousProfile && !asynchronousProfile)
             Add("IR 35 requires the exact synchronous static/token pair or the five-capability async base 29 profile.");
         if (baseSchema == 14 && (module.LanguageOutcomeTypes is not null || module.LanguageErrorCatalog is not null)

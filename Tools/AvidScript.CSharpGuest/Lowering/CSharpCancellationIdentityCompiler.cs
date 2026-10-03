@@ -53,6 +53,17 @@ public static class CSharpCancellationIdentityCompiler
         return TryUpgradeCore(input, out module, out error);
     }
 
+    internal static bool TryUpgradeForStaticAsyncValue(CSharpStaticExecutionContext context, GuestModule input,
+        out GuestModule? module, out string? error)
+    {
+        module = null;
+        error = null;
+        if (context.Types.Count == 0 || input.StaticStorage is not { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }
+            || input.AsyncSynchronousExceptions is null)
+        { error = "Static catch identity requires its validated source-owned execution context."; return false; }
+        return TryUpgradeCore(input, out module, out error);
+    }
+
     private static bool TryUpgradeCore(GuestModule input, out GuestModule? module, out string? error)
     {
         module = null;

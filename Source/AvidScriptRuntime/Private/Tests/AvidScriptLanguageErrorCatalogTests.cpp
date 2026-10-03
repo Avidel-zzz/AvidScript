@@ -1573,6 +1573,58 @@ bool FAvidScriptAsyncVoidCompositionCatalogTest::RunTest(const FString& Paramete
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptStaticAsyncValueCatalogTest,
+    "AvidScript.Runtime.LanguageErrorCatalog.StaticAsyncValueAdmission",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptStaticAsyncValueCatalogTest::RunTest(const FString& Parameters)
+{
+    using namespace AvidScriptLanguageErrorCatalogTests;
+    const FString Metadata = Json(Document(38));
+    TUniquePtr<FAvidScriptLanguageErrorCatalog> Catalog;
+    FString Error;
+    auto Provenance = [](const TCHAR* Base, const TCHAR* Capabilities) {
+        return VoidOwnerProvenance(Capabilities).Replace(TEXT("guest_ir=36/1.35"), TEXT("guest_ir=38/1.37"))
+            .Replace(TEXT("semantic=55/1.64"), TEXT("semantic=57/1.66")) + TEXT("\nsource_execution=") + Base;
+    };
+    const FString Named = Provenance(TEXT("52/1.61"), TEXT("async.cancellation_identity@1,error.exception_values@1,managed.static_storage@1"));
+    const FString Token = Provenance(TEXT("53/1.62"), TEXT("async.await_readiness@1,async.cancellation_identity@1,error.cancellation_token_value@1,managed.static_storage@1"));
+    for (const FString& Valid : {Named, Token})
+    {
+        if (!TestTrue(TEXT("IR38 admits only actual static async value capabilities"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+            VoidOwnerModule(&Metadata, Valid), ModuleId, Catalog, Error))) return false;
+        TestTrue(TEXT("IR38 preserves Task cancellation identity"), Catalog->SupportsTaskCancellationIdentity());
+        TestFalse(TEXT("IR38 cannot report async void"), Catalog->SupportsAsyncVoidErrorOwner());
+        TestEqual(TEXT("Token import authority follows actual declaration"), Catalog->SupportsExceptionCancellationToken(), Valid == Token);
+    }
+    for (const FString& Invalid : {
+        Named.Replace(TEXT("guest_ir=38/1.37"), TEXT("guest_ir=38/1.36")),
+        Named.Replace(TEXT("semantic=57/1.66"), TEXT("semantic=56/1.65")),
+        Named.Replace(TEXT("\nsource_execution=52/1.61"), TEXT("")),
+        Named.Replace(TEXT("source_execution=52/1.61"), TEXT("source_execution=53/1.62")),
+        Token.Replace(TEXT("source_execution=53/1.62"), TEXT("source_execution=52/1.61")),
+        Named.Replace(TEXT("execution_base=29/1.28"), TEXT("execution_base=30/1.29")),
+        Named.Replace(TEXT("error.exception_values@1,"), TEXT("")),
+        Token.Replace(TEXT("error.cancellation_token_value@1,"), TEXT("")),
+        Named.Replace(TEXT("managed.static_storage@1"), TEXT("managed.static_storage@2")),
+        Named.Replace(TEXT("error.exception_values@1"), TEXT("error.async_void_owner@1")),
+        Named.Replace(TEXT("async.cancellation_identity@1"), TEXT("async.cancellation_identity@1,async.cancellation_identity@1")),
+        Named + TEXT("\nunknown=1") })
+    {
+        TestFalse(TEXT("IR38 rejects incomplete, forged and mismatched composition contracts"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+            VoidOwnerModule(&Metadata, Invalid), ModuleId, Catalog, Error));
+        TestFalse(TEXT("Rejected IR38 publishes no catalog"), Catalog != nullptr);
+    }
+    const FString OldMetadata = Json(Document(35));
+    TestFalse(TEXT("Older envelope cannot retain an IR38 source marker"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+        VoidOwnerModule(&OldMetadata, Named.Replace(TEXT("guest_ir=38/1.37"), TEXT("guest_ir=35/1.34"))), ModuleId, Catalog, Error));
+    TestFalse(TEXT("IR38 binds the loaded module identity"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+        VoidOwnerModule(&Metadata, Named), TEXT("other_module"), Catalog, Error));
+    TestFalse(TEXT("IR38 requires its error catalog"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+        VoidOwnerModule(nullptr, Named), ModuleId, Catalog, Error));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAsyncVoidReportTest,
 	"AvidScript.Runtime.LanguageErrorCatalog.AsyncVoidCheckedReport",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
