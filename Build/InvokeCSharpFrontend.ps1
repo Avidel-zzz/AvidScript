@@ -37,12 +37,16 @@ New-Item -ItemType Directory -Force -Path $NuGetPackages | Out-Null
     "<?xml version=`"1.0`" encoding=`"utf-8`"?><configuration><packageSources><clear /></packageSources></configuration>",
     $Utf8)
 
+$env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
+$env:DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK = '1'
+$env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = '0'
+$env:DOTNET_NOLOGO = '1'
+$env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
 $env:DOTNET_CLI_HOME = $ToolHome
 $env:APPDATA = $AppData
 $env:LOCALAPPDATA = $LocalAppData
 $env:NUGET_PACKAGES = $NuGetPackages
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
-$env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = "1"
 
 $ExitCode = 2
 Push-Location $PluginRoot
@@ -52,7 +56,7 @@ try {
         throw "C# frontend requires dotnet SDK $ExpectedSdkVersion but selected $SelectedSdkVersion."
     }
 
-    & $DotNetPath build $FrontendProject -c $Configuration --nologo --verbosity quiet "-p:RestoreConfigFile=$NuGetConfig"
+    & $DotNetPath build $FrontendProject -c $Configuration --nologo --verbosity quiet --disable-build-servers -m:1 -nodeReuse:false -p:UseSharedCompilation=false "-p:RestoreConfigFile=$NuGetConfig"
     $ExitCode = $LASTEXITCODE
     if ($ExitCode -eq 0) {
         $FrontendDll = Join-Path $PluginRoot "Tools/AvidScript.CSharpFrontend/bin/$Configuration/net8.0/AvidScript.CSharpFrontend.dll"

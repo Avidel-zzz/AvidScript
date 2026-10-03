@@ -12,6 +12,11 @@
 - Harness 与架构脚本使用 PowerShell 7 `pwsh -NoProfile`。
 - .NET 从插件 cwd 使用 `%USERPROFILE%/.dotnet/dotnet.exe`，版本必须精确为 `8.0.416`。
 - .NET 临时 `DOTNET_CLI_HOME`、NuGet cache 和 CLI state 放在仓库外的阶段目录。
+- 每次启动 .NET 前设置进程级 `DOTNET_ADD_GLOBAL_TOOLS_TO_PATH=0`、`DOTNET_NOLOGO=1`、`DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE=true`；不修改用户或机器环境变量。`DOTNET_SKIP_FIRST_TIME_EXPERIENCE` 已失效，不能用于防止 PATH 污染。
+- 普通编译工具设置进程级 `DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK=1`，避免新 CLI_HOME 首次运行自动维护可选 workload；需要 WASI/AOT workload 的专门安装与验收走明确入口。
+- 普通编译工具设置进程级 `DOTNET_GENERATE_ASPNET_CERTIFICATE=0`，不生成与游戏脚本构建无关的 ASP.NET 开发证书。
+- 构建和运行串行执行。MSBuild 使用 `-m:1 -nodeReuse:false -p:UseSharedCompilation=false --disable-build-servers`，不保留后台编译服务；优先复用已有产物，不重复安装 SDK。
+- 临时探针在 `finally` 回收本次创建的目录；递归删除前校验绝对路径与 owner，不清理保留证据、用户文件或其他任务的进程和产物。
 - UE 使用 `C:\UnrealEngine` 的源码版 UE5.8；构建默认 no-clean、`-WaitMutex`、`-NoHotReloadFromIDE`。
 
 ## 分层 Profile

@@ -205,14 +205,18 @@ foreach ($Directory in @($NuGetDirectory, $LocalAppData, $NuGetPackages)) {
     $NuGetConfig,
     "<?xml version=`"1.0`" encoding=`"utf-8`"?><configuration><packageSources><clear /></packageSources></configuration>",
     $Utf8)
+$env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
+$env:DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK = '1'
+$env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = '0'
+$env:DOTNET_NOLOGO = '1'
+$env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
 $env:DOTNET_CLI_HOME = $ToolHome
 $env:APPDATA = $AppData
 $env:LOCALAPPDATA = $LocalAppData
 $env:NUGET_PACKAGES = $NuGetPackages
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
-$env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = "1"
 
-& $DotNetPath build $GeneratorProject -c $Configuration --nologo --verbosity quiet "-p:RestoreConfigFile=$NuGetConfig"
+& $DotNetPath build $GeneratorProject -c $Configuration --nologo --verbosity quiet --disable-build-servers -m:1 -nodeReuse:false -p:UseSharedCompilation=false "-p:RestoreConfigFile=$NuGetConfig"
 if ($LASTEXITCODE -ne 0) {
     throw "UE type generator build failed with exit code $LASTEXITCODE."
 }

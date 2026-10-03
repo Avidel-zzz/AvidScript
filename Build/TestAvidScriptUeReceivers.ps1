@@ -8,6 +8,11 @@ $PreviousCliHome = $env:DOTNET_CLI_HOME
 Push-Location $PluginRoot
 try {
     $env:AVIDSCRIPT_MANAGED_HEAP_WASM_DIR = Join-Path $ProjectRoot 'Saved/AvidScriptManagedHeapTests/GuestFixtures'
+    $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
+    $env:DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK = '1'
+    $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = '0'
+    $env:DOTNET_NOLOGO = '1'
+    $env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
     $env:DOTNET_CLI_HOME = Join-Path ([IO.Path]::GetTempPath()) 'AvidScript-P66-DotNet'
     $Dotnet = Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'
     $Sdk = & $Dotnet --version

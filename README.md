@@ -78,8 +78,16 @@ C# 前端和 WASM 模块生成器只在构建时运行。运行时插件加载 `
 
 ```powershell
 pwsh -NoProfile -File Build/BuildCSharpActorLifecycle.ps1
-dotnet run --project Tools/AvidScript.CSharpGuest.Tests/AvidScript.CSharpGuest.Tests.csproj -c Release
+$dotnet = Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'
+$env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = '0'
+$env:DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK = '1'
+$env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
+& $dotnet build Tools/AvidScript.CSharpGuest.Tests -c Release --disable-build-servers `
+  -m:1 -nodeReuse:false -p:UseSharedCompilation=false
+& $dotnet run --project Tools/AvidScript.CSharpGuest.Tests -c Release --no-build --no-restore
 ```
+
+构建入口使用已安装的 SDK，不向用户 PATH 追加临时工具目录；C# 编译使用单个 MSBuild 节点并关闭后台编译服务。[环境安全检查](Build/Contracts/TestDotNetEnvironmentSafety.ps1)覆盖 SDK 首次运行与临时目录回收。
 
 主要目录：[`Source/`](Source/) 是 UE Runtime 和 Editor 模块；[`Tools/`](Tools/) 是 C# 编译器与生成工具；[`Build/`](Build/) 是构建入口；[`Samples/`](Samples/) 是可运行示例。开发进度见[迭代路线图](Docs/Architecture/AvidScript_Iteration_Roadmap.md)。
 

@@ -748,7 +748,10 @@ function Invoke-AvidScriptUiSaveDemo {
     $Environment = @{
         DOTNET_CLI_HOME = (Join-Path ([IO.Path]::GetTempPath()) "AvidScriptUiSaveDemo/$RunId/dotnet")
         NUGET_PACKAGES = (Join-Path ([IO.Path]::GetTempPath()) 'AvidScriptUiSaveDemo/nuget')
-        DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'; DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+        DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = '0'; DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+        DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK = '1'
+        DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
+        DOTNET_NOLOGO = '1'; DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
     }
     $Version = Invoke-AvidScriptUiSaveTool -Executable $Context.dotnet -Arguments @('--version') `
         -LogPath (Join-Path $RunRoot 'dotnet.process.log') -Environment $Environment

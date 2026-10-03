@@ -14,6 +14,11 @@ $null = New-Item -ItemType Directory -Path $runRoot -Force
 $oldCliHome = $env:DOTNET_CLI_HOME
 Push-Location $pluginRoot
 try {
+    $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
+    $env:DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK = '1'
+    $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = '0'
+    $env:DOTNET_NOLOGO = '1'
+    $env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
     $env:DOTNET_CLI_HOME = Join-Path ([IO.Path]::GetTempPath()) 'AvidScriptAsyncThrowCliHome'
     $sdk = & $DotNetPath --version
     if ($LASTEXITCODE -ne 0 -or $sdk -cne '8.0.416') { throw "Expected SDK 8.0.416, got $sdk" }

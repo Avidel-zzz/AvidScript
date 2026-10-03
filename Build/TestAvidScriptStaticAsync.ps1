@@ -19,6 +19,11 @@ foreach ($name in @('DOTNET_CLI_HOME', 'NUGET_PACKAGES', 'AVIDSCRIPT_STATIC_ASYN
 Push-Location $pluginRoot
 try {
     $env:NUGET_PACKAGES = if ($oldEnvironment.NUGET_PACKAGES) { $oldEnvironment.NUGET_PACKAGES } else { Join-Path $env:USERPROFILE '.nuget/packages' }
+    $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
+    $env:DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK = '1'
+    $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = '0'
+    $env:DOTNET_NOLOGO = '1'
+    $env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
     $env:DOTNET_CLI_HOME = Join-Path $runRoot 'dotnet-home'
     $env:AVIDSCRIPT_STATIC_ASYNC_FIXTURE_DIR = Join-Path $runRoot 'Fixtures'
     $env:AVIDSCRIPT_ASYNC_MEMBER_FIXTURE_DIR = Join-Path $runRoot 'MemberFixtures'

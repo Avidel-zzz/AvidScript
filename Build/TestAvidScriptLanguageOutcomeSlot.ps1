@@ -12,6 +12,11 @@ $PreviousCliHome = $env:DOTNET_CLI_HOME
 $PreviousOutputDirectory = $env:AVIDSCRIPT_OUTCOME_SLOT_WASM_DIR
 Push-Location $PluginRoot
 try {
+    $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
+    $env:DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK = '1'
+    $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = '0'
+    $env:DOTNET_NOLOGO = '1'
+    $env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
     $env:DOTNET_CLI_HOME = Join-Path ([IO.Path]::GetTempPath()) 'avidscript-outcome-dotnet'
     $env:AVIDSCRIPT_OUTCOME_SLOT_WASM_DIR = $GuestDirectory
     $Sdk = & $DotNet --version

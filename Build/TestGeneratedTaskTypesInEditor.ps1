@@ -127,6 +127,11 @@ try {
     if ((@($originalTypes.types.cpp_name | Sort-Object) -join '|') -cne 'AExplosiveProjectile|AProjectile|UEncounterSubsystem|UHealthComponent|UProfileSubsystem') {
         throw 'This repository test requires the installed ScriptDefinedTypes sample so its canonical restoration can be validated.'
     }
+    $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
+    $env:DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK = '1'
+    $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = '0'
+    $env:DOTNET_NOLOGO = '1'
+    $env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
     $env:DOTNET_CLI_HOME = Join-Path ([IO.Path]::GetTempPath()) 'AvidScriptGeneratedTaskCliHome'
     $null = New-Item -ItemType Directory -Path $backupRoot -Force
     Write-Output "Generated Task Editor evidence: $runRoot"

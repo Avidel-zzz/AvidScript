@@ -23,6 +23,11 @@ $PreviousCliHome = $env:DOTNET_CLI_HOME
 $PreviousTelemetry = $env:DOTNET_CLI_TELEMETRY_OPTOUT
 $PreviousFixtures = $env:AVIDSCRIPT_MANAGED_HEAP_WASM_DIR
 try {
+    $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
+    $env:DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK = '1'
+    $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = '0'
+    $env:DOTNET_NOLOGO = '1'
+    $env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
     $env:DOTNET_CLI_HOME = Join-Path ([System.IO.Path]::GetTempPath()) 'avidscript-task-int-dotnet'
     $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
     $env:AVIDSCRIPT_MANAGED_HEAP_WASM_DIR = $FixtureRoot

@@ -55,7 +55,11 @@ function Invoke-AvidScriptCompatibilityProcess {
     $StartInfo.RedirectStandardOutput = $true
     $StartInfo.RedirectStandardError = $true
     $StartInfo.Environment['DOTNET_CLI_TELEMETRY_OPTOUT'] = '1'
-    $StartInfo.Environment['DOTNET_SKIP_FIRST_TIME_EXPERIENCE'] = '1'
+    $StartInfo.Environment['DOTNET_ADD_GLOBAL_TOOLS_TO_PATH'] = '0'
+    $StartInfo.Environment['DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK'] = '1'
+    $StartInfo.Environment['DOTNET_GENERATE_ASPNET_CERTIFICATE'] = '0'
+    $StartInfo.Environment['DOTNET_NOLOGO'] = '1'
+    $StartInfo.Environment['DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE'] = 'true'
     foreach ($Argument in $Arguments) {
         [void]$StartInfo.ArgumentList.Add($Argument)
     }

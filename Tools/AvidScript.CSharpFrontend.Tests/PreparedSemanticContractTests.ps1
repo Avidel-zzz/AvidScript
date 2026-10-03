@@ -156,6 +156,11 @@ function Assert-PreparedSemanticFailure {
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 $env:TEMP = Join-Path $RunRoot "Temp"
 $env:TMP = $env:TEMP
+$env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
+$env:DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK = '1'
+$env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = '0'
+$env:DOTNET_NOLOGO = '1'
+$env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
 $env:DOTNET_CLI_HOME = Join-Path $RunRoot "DotNetHome"
 $env:APPDATA = Join-Path $RunRoot "AppData"
 $env:LOCALAPPDATA = Join-Path $RunRoot "LocalAppData"
