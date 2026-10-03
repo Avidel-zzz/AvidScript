@@ -226,7 +226,8 @@ function Get-AvidScriptCSharpSemanticCacheContext {
         [Parameter(Mandatory = $true)][string]$Configuration,
         [Parameter(Mandatory = $true)][string]$SourcePath,
         [Parameter(Mandatory = $true)][string]$ProjectPath,
-        [AllowNull()][object]$AuthorizationPackage
+        [AllowNull()][object]$AuthorizationPackage,
+        [AllowNull()][object]$LanguageProfile
     )
 
     $PluginRootFullPath = Get-AvidScriptBindingFullPath $PluginRoot
@@ -280,6 +281,10 @@ function Get-AvidScriptCSharpSemanticCacheContext {
         authorization = $AuthorizationIdentity
         toolchain_fingerprint = [string]$Toolchain.Sha256
     }
+    if ($null -ne $LanguageProfile) {
+        $CanonicalInput.language_profile = $LanguageProfile.Identity
+        $CanonicalInput.profile_owner = Get-AvidScriptCSharpProfileToolIdentity $LanguageProfile
+    }
     $CacheKey = Get-AvidScriptUtf8JsonSha256 $CanonicalInput
     $EntryDirectory = Join-Path (Join-Path $CacheRootFullPath $CacheKey.Substring(0, 2)) $CacheKey
     return [pscustomobject]@{
@@ -298,6 +303,7 @@ function Get-AvidScriptCSharpSemanticCacheContext {
         DiagnosticCode = ""
         DiagnosticMessage = ""
         CanonicalInput = $CanonicalInput
+        LanguageProfile = $LanguageProfile
     }
 }
 
@@ -669,6 +675,7 @@ function Import-AvidScriptCSharpSemanticCacheEntry {
             -ProjectRoot $ProjectRoot `
             -ExpectedSourcePath $ExpectedSourcePath `
             -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
+            -ExpectedLanguageProfile $Context.LanguageProfile `
             -FrontendDestinationPath $FrontendDestinationPath `
             -SemanticDestinationPath $SemanticDestinationPath
         return [pscustomobject]@{
@@ -679,6 +686,7 @@ function Import-AvidScriptCSharpSemanticCacheEntry {
             EntryReportSha256 = [string]$Prepared.PreparedReportSha256
             FrontendModel = $Prepared.FrontendModel
             SemanticModel = $Prepared.SemanticModel
+            ProfileAdmission = $Prepared.ProfileAdmission
         }
     }
     catch {
@@ -777,7 +785,8 @@ function Assert-AvidScriptSemanticCachePublicationContext {
         -Configuration ([string]$Context.Configuration) `
         -SourcePath $ExpectedSourceFullPath `
         -ProjectPath $ContextProjectPath `
-        -AuthorizationPackage $ExpectedAuthorizationPackage
+        -AuthorizationPackage $ExpectedAuthorizationPackage `
+        -LanguageProfile $Context.LanguageProfile
     Assert-AvidScriptCSharpSemanticCache `
         -Condition ([string]$RecomputedContext.CacheKey -ceq [string]$Context.CacheKey -and
             [string]$RecomputedContext.ToolchainFingerprint -ceq [string]$Context.ToolchainFingerprint) `
@@ -841,6 +850,7 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
                 -ProjectRoot $ProjectRoot `
                 -ExpectedSourcePath $ExpectedSourcePath `
                 -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
+                -ExpectedLanguageProfile $Context.LanguageProfile `
                 -FrontendDestinationPath $ValidationFrontendPath `
                 -SemanticDestinationPath $ValidationSemanticPath
         }
@@ -925,7 +935,7 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
             semantic = [ordered]@{
                 schema_version = [int]$Prepared.SemanticModel.schema_version
                 version = [string]$Prepared.SemanticModel.semantic_version
-                succeeded = $true
+                succeeded = [bool]$Prepared.SemanticModel.succeeded
                 source_sha256 = [string]$Prepared.SemanticModel.source.sha256
                 frontend_sha256 = [string]$Prepared.SemanticModel.source.frontend_sha256
                 artifact_sha256 = Get-AvidScriptBindingSha256Hex $StagingSemanticPath
@@ -936,6 +946,7 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
                 toolchain_fingerprint = [string]$Context.ToolchainFingerprint
             }
         }
+        if ($null -ne $Context.LanguageProfile) { $EntryReport.language_profile = $Context.LanguageProfile.Identity }
         $ExpectedEntryReportSha256 = Get-AvidScriptUtf8JsonSha256 $EntryReport
         $StagingEntryReportPath = Join-Path $StagingDirectory "entry.csharp.report.json"
         Write-AvidScriptSemanticCacheJson `
@@ -1000,6 +1011,7 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
             -ProjectRoot $ProjectRoot `
             -ExpectedSourcePath $ExpectedSourcePath `
             -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
+            -ExpectedLanguageProfile $Context.LanguageProfile `
             -FrontendDestinationPath (Join-Path $ValidationDirectory "staging.frontend.json") `
             -SemanticDestinationPath (Join-Path $ValidationDirectory "staging.semantic.json") | Out-Null
         Remove-Item -LiteralPath $StagingValidationReportPath -Force -ErrorAction Stop

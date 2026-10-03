@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 $BuildDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $BuildDir "AvidScriptCSharpBindingPackage.ps1")
+. (Join-Path $BuildDir "AvidScriptCSharpLanguageProfile.ps1")
 
 function Fail-AvidScriptPreparedSemantic {
     param(
@@ -150,6 +151,7 @@ function Import-AvidScriptCSharpPreparedSemantic {
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
         [Parameter(Mandatory = $true)][string]$ExpectedSourcePath,
         [AllowNull()][object]$ExpectedAuthorizationPackage,
+        [AllowNull()][object]$ExpectedLanguageProfile,
         [Parameter(Mandatory = $true)][string]$FrontendDestinationPath,
         [Parameter(Mandatory = $true)][string]$SemanticDestinationPath
     )
@@ -173,6 +175,14 @@ function Import-AvidScriptCSharpPreparedSemantic {
         -Path $PreparedReportFullPath `
         -Code "ASBI4403" `
         -Label "Prepared semantic report"
+    try {
+        Assert-AvidScriptCSharpResolvedProfile -Profile $ExpectedLanguageProfile
+        $ReportProfile = $PreparedReport.PSObject.Properties['language_profile']
+        Assert-AvidScriptCSharpProfileIdentity `
+            -Expected $(if ($null -ne $ExpectedLanguageProfile) { $ExpectedLanguageProfile.Identity } else { $null }) `
+            -Actual $(if ($null -ne $ReportProfile) { $ReportProfile.Value } else { $null })
+    }
+    catch { Fail-AvidScriptPreparedSemantic -Code 'ASBI4403' -Message $_.Exception.Message }
     Assert-AvidScriptPreparedSemantic `
         -Condition ([int]$PreparedReport.schema_version -eq 1 -and
             [string]$PreparedReport.result -ceq "direct_abi_built" -and
@@ -360,15 +370,26 @@ function Import-AvidScriptCSharpPreparedSemantic {
     $SupportedSemanticPair =
         ([int]$SemanticModel.schema_version -eq 31 -and [string]$SemanticModel.semantic_version -ceq '1.40') -or
         ([int]$SemanticModel.schema_version -eq 45 -and [string]$SemanticModel.semantic_version -ceq '1.54')
+    $ProfileAdmission = $null
+    if ($null -ne $ExpectedLanguageProfile) {
+        try {
+            $ProfileAdmission = Get-AvidScriptCSharpProfileAdmission -Profile $ExpectedLanguageProfile `
+                -SemanticPath $SemanticSourcePath -ModuleId ([string]$PreparedReport.module_id)
+            $SupportedSemanticPair = $true
+        }
+        catch { Fail-AvidScriptPreparedSemantic -Code 'ASBI4403' -Message $_.Exception.Message }
+    }
     Assert-AvidScriptPreparedSemantic `
         -Condition ($SupportedSemanticPair -and
+            $PreparedReport.semantic.succeeded -is [bool] -and
+            $SemanticModel.succeeded -is [bool] -and
             [int]$PreparedReport.semantic.schema_version -eq [int]$SemanticModel.schema_version -and
             [string]$PreparedReport.semantic.version -ceq [string]$SemanticModel.semantic_version -and
-            [bool]$PreparedReport.semantic.succeeded -and
+            [bool]$PreparedReport.semantic.succeeded -eq [bool]$SemanticModel.succeeded -and
             [string]$PreparedReport.semantic.source_sha256 -ceq $ExpectedSourceSha256 -and
             [string]$PreparedReport.semantic.frontend_sha256 -ceq $ExpectedSourceSha256 -and
-            [bool]$SemanticModel.succeeded -and
-            @($SemanticModel.diagnostics | Where-Object { [string]$_.severity -ceq 'error' }).Count -eq 0 -and
+            (($null -ne $ProfileAdmission) -or ([bool]$SemanticModel.succeeded -and
+                @($SemanticModel.diagnostics | Where-Object { [string]$_.severity -ceq 'error' }).Count -eq 0)) -and
             [string]$SemanticModel.source.sha256 -ceq $ExpectedSourceSha256 -and
             [string]$SemanticModel.source.frontend_sha256 -ceq $ExpectedSourceSha256 -and
             [string]$SemanticModel.source.source_id -ceq [string]$PreparedReport.source.file) `
@@ -384,6 +405,7 @@ function Import-AvidScriptCSharpPreparedSemantic {
     return [pscustomobject]@{
         FrontendModel = $FrontendModel
         SemanticModel = $SemanticModel
+        ProfileAdmission = $ProfileAdmission
         PreparedReportPath = $PreparedReportFullPath
         PreparedReportSha256 = Get-AvidScriptBindingSha256Hex $PreparedReportFullPath
     }

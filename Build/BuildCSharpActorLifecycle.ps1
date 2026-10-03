@@ -20,6 +20,7 @@ param(
     [string]$DataLaneFusion = "enabled",
     [ValidateSet("disabled", "bounded")]
     [string]$LanguageErrors = "disabled",
+    [string]$LanguageProfile = '',
     [switch]$AsyncExceptionFlow,
     [switch]$DirectAwaitCleanup,
     [switch]$AsyncCancellationFlow,
@@ -63,6 +64,20 @@ $script:GeneratedTypeExportNames = [System.Collections.Generic.HashSet[string]]:
 . (Join-Path $BuildDir "AvidScriptCSharpSemanticCache.ps1")
 . (Join-Path $BuildDir "AvidScriptCSharpCompilationCache.ps1")
 . (Join-Path $BuildDir "AvidScriptCSharpCompilerWorker.ps1")
+$ResolvedLanguageProfile = $null
+$ProfileAdmission = $null
+if ($PSBoundParameters.ContainsKey('LanguageProfile')) {
+    if ([string]::IsNullOrWhiteSpace($LanguageProfile)) { throw 'LanguageProfile cannot be empty.' }
+    foreach ($Option in @('AsyncExceptionFlow', 'DirectAwaitCleanup', 'AsyncCancellationFlow')) {
+        if ($PSBoundParameters.ContainsKey($Option)) { throw "LanguageProfile cannot be combined with $Option." }
+    }
+    if (($PSBoundParameters.ContainsKey('LanguageErrors') -and $LanguageErrors -cne 'bounded') -or
+        $DataLaneFusion -cne 'enabled' -or $DebugInstrumentation -ceq 'enabled') {
+        throw 'Gameplay profile requires bounded language errors, data-lane fusion and disabled debug instrumentation.'
+    }
+    $LanguageErrors = 'bounded'
+    $DebugInstrumentation = 'disabled'
+}
 
 $ResolvedDebugInstrumentation = if ($DebugInstrumentation -ceq "auto") {
     if ($Configuration -ieq "Debug") { "enabled" } else { "disabled" }
@@ -70,7 +85,7 @@ $ResolvedDebugInstrumentation = if ($DebugInstrumentation -ceq "auto") {
 else {
     $DebugInstrumentation
 }
-if ($LanguageErrors -ceq "bounded") {
+if ($LanguageErrors -ceq "bounded" -and [string]::IsNullOrWhiteSpace($LanguageProfile)) {
     if ($DataLaneFusion -cne "enabled" -or $ResolvedDebugInstrumentation -cne "disabled") {
         throw "Bounded language errors require data-lane fusion enabled and debug instrumentation disabled."
     }
@@ -467,6 +482,17 @@ function Test-CompilerInjectedBindingImport {
     }
 
     $ParameterTypes = @($Import.parameter_type_ids | ForEach-Object { [string]$_ })
+    if ($null -ne $ProfileAdmission -and [string]$Import.dispatch_class -ceq 'semantic') {
+        foreach ($ExpectedImport in $ProfileAdmission.compiler_imports) {
+            if ([string]$Import.id -ceq [string]$ExpectedImport.id -and
+                [string]$Import.name -ceq [string]$ExpectedImport.name -and
+                [string]$Import.module -ceq [string]$ExpectedImport.module -and
+                [string]$Import.return_type_id -ceq [string]$ExpectedImport.return_type_id -and
+                [string]::Join("`n", $ParameterTypes) -ceq [string]::Join("`n", [string[]]$ExpectedImport.parameter_type_ids)) {
+                return $true
+            }
+        }
+    }
     if ([string]$Import.dispatch_class -ceq "semantic") {
         # Managed objects, Task references and suspended frames are compiler-owned,
         # including without generated UE types or language-error previews. A user
@@ -967,6 +993,10 @@ function Write-BuildReport {
         }
         diagnostics = @($UnifiedDiagnostics)
     }
+    if ($null -ne $ResolvedLanguageProfile) {
+        $Report.language_profile = $ResolvedLanguageProfile.Identity
+        $Report.language_profile_admission = $ProfileAdmission
+    }
     Write-JsonAtomic -Path $ReportPath -Value $Report
 }
 
@@ -1074,6 +1104,7 @@ function Initialize-BuildCompilerWorkerIfNeeded {
             -PluginRoot $PluginRoot `
             -DotNetPath $DotNet.Path `
             -Configuration $Configuration `
+            -ProjectRoot $ProjectRoot `
             -RequestTimeoutSeconds $CompilerWorkerTimeoutSeconds `
             -IdleTimeoutSeconds $CompilerWorkerIdleTimeoutSeconds
         $script:CompilerWorker.toolchain_fingerprint = [string]$Context.ToolchainFingerprint
@@ -1398,6 +1429,18 @@ if (-not $DotNet.Found) {
 
 $SemanticCacheContext = $null
 $SemanticCacheHit = $false
+if (-not [string]::IsNullOrWhiteSpace($LanguageProfile)) {
+    try {
+        $ResolvedLanguageProfile = Resolve-AvidScriptCSharpLanguageProfile -Name $LanguageProfile `
+            -PluginRoot $PluginRoot -DotNetPath $DotNet.Path -Configuration $Configuration
+        $CompilerWorker.protocol_version = 2
+    }
+    catch {
+        $Diagnostics += [ordered]@{ code = 'ASBI4701'; severity = 'error'; message = $_.Exception.Message; file = $SourceId }
+        Write-BuildReport -Result 'language_profile_invalid' -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+        exit 1
+    }
+}
 if ([string]::IsNullOrWhiteSpace($PreparedBuildReportPath) -and -not $DisableSemanticCache) {
     try {
         $SemanticCacheContext = Get-AvidScriptCSharpSemanticCacheContext `
@@ -1407,7 +1450,8 @@ if ([string]::IsNullOrWhiteSpace($PreparedBuildReportPath) -and -not $DisableSem
             -Configuration $Configuration `
             -SourcePath $SourcePath `
             -ProjectPath $ProjectPath `
-            -AuthorizationPackage $BindingAuthorizationInfo
+            -AuthorizationPackage $BindingAuthorizationInfo `
+            -LanguageProfile $ResolvedLanguageProfile
         $SemanticCache.key = [string]$SemanticCacheContext.CacheKey
         $SemanticCache.toolchain_fingerprint = [string]$SemanticCacheContext.ToolchainFingerprint
         $CacheImport = Import-AvidScriptCSharpSemanticCacheEntry `
@@ -1435,6 +1479,7 @@ if ([string]::IsNullOrWhiteSpace($PreparedBuildReportPath) -and -not $DisableSem
             $SemanticCache.entry_report_sha256 = [string]$CacheImport.EntryReportSha256
             $FrontendModel = $CacheImport.FrontendModel
             $SemanticModel = $CacheImport.SemanticModel
+            $ProfileAdmission = $CacheImport.ProfileAdmission
             $Diagnostics += @(Convert-CompilerDiagnostics $FrontendModel $SourceId "frontend")
             $Diagnostics += @(Convert-CompilerDiagnostics $SemanticModel $SourceId "semantic")
             $SelectedScriptTypeName = Get-SelectedScriptTypeName
@@ -1473,10 +1518,12 @@ if (-not [string]::IsNullOrWhiteSpace($PreparedBuildReportPath)) {
             -ProjectRoot $ProjectRoot `
             -ExpectedSourcePath $SourcePath `
             -ExpectedAuthorizationPackage $BindingAuthorizationInfo `
+            -ExpectedLanguageProfile $ResolvedLanguageProfile `
             -FrontendDestinationPath $FrontendArtifactPath `
             -SemanticDestinationPath $SemanticArtifactPath
         $FrontendModel = $PreparedSemantic.FrontendModel
         $SemanticModel = $PreparedSemantic.SemanticModel
+        $ProfileAdmission = $PreparedSemantic.ProfileAdmission
         $Diagnostics += @(Convert-CompilerDiagnostics $FrontendModel $SourceId "frontend")
         $Diagnostics += @(Convert-CompilerDiagnostics $SemanticModel $SourceId "semantic")
         $SelectedScriptTypeName = Get-SelectedScriptTypeName
@@ -1561,6 +1608,7 @@ elseif (-not $SemanticCacheHit) {
         frontend_path = $FrontendArtifactPath
         output_path = $SemanticArtifactPath
     }
+    if ($null -ne $ResolvedLanguageProfile) { $SemanticWorkerFields.language_profile = $ResolvedLanguageProfile.Identity }
     # The default sample owns its static ABI declarations; injecting the generated
     # facade would duplicate those symbols. Its explicit package is still validated
     # against emitted imports and retained in the runtime manifest below.
@@ -1599,6 +1647,7 @@ elseif (-not $SemanticCacheHit) {
         if ($AsyncExceptionFlow) {
             $SemanticArguments += @("-AsyncExceptionFlow", "enabled")
         }
+        if ($null -ne $ResolvedLanguageProfile) { $SemanticArguments += @('-LanguageProfile', $LanguageProfile) }
         if ($DirectAwaitCleanup) {
             $SemanticArguments += @("-DirectAwaitCleanup", "enabled")
         }
@@ -1703,9 +1752,20 @@ elseif (-not $SemanticCacheHit) {
         $null -ne $SemanticModel -and -not [bool]$SemanticModel.succeeded -and
         ($BoundedSyncSemanticArtifact -or $BoundedAsyncSemanticArtifact -or
             $BoundedAsyncExceptionSemanticArtifact -or $BoundedDirectAwaitSemanticArtifact -or $BoundedTaskLocalLifetimeArtifact)
-    if ($SemanticExitCode -ne 0 -and -not $BoundedSemanticArtifact -or
+    if ($null -ne $ResolvedLanguageProfile -and $SemanticExitCode -in @(0, 1) -and $null -ne $SemanticModel) {
+        try {
+            $ProfileAdmission = Get-AvidScriptCSharpProfileAdmission -Profile $ResolvedLanguageProfile `
+                -SemanticPath $SemanticArtifactPath -ModuleId $ModuleId
+        }
+        catch {
+            $Diagnostics += [ordered]@{ code = 'ASBI4701'; severity = 'error'; message = $_.Exception.Message; file = $SourceId }
+        }
+    }
+    if ($SemanticExitCode -ne 0 -and -not $BoundedSemanticArtifact -and $null -eq $ProfileAdmission -or
+        $SemanticExitCode -notin @(0, 1) -or
         $null -eq $SemanticModel -or
-        -not [bool]$SemanticModel.succeeded -and -not $BoundedSemanticArtifact) {
+        -not [bool]$SemanticModel.succeeded -and -not $BoundedSemanticArtifact -and $null -eq $ProfileAdmission -or
+        ($null -ne $ResolvedLanguageProfile -and $null -eq $ProfileAdmission)) {
         if ($null -eq $SemanticModel) {
             $Diagnostics += [ordered]@{ code = "semantic_failed"; severity = "error"; message = "C# semantic analyzer did not publish a valid artifact."; output = @($SemanticOutput) }
         }
@@ -1725,7 +1785,7 @@ elseif (-not $SemanticCacheHit) {
         Write-BuildReport -Result "semantic_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
         exit 1
     }
-    if ($BoundedSemanticArtifact) {
+    if ($BoundedSemanticArtifact -and $null -eq $ResolvedLanguageProfile) {
         $Diagnostics = @($Diagnostics | Where-Object {
             [string]$_.code -cne $(if ($BoundedAsyncSemanticArtifact -or
                 $BoundedAsyncExceptionSemanticArtifact -or
@@ -1742,6 +1802,17 @@ $TaskLocalLifetimeSemanticArtifact = $TaskLocalLifetimeSemanticArtifact -or (
     $null -ne $SemanticModel -and [int]$SemanticModel.schema_version -eq 45 -and
     [string]$SemanticModel.semantic_version -ceq '1.54' -and [bool]$SemanticModel.succeeded -and
     @($SemanticModel.diagnostics | Where-Object { [string]$_.severity -ceq 'error' }).Count -eq 0)
+
+if ($null -ne $ResolvedLanguageProfile -and
+    ($null -eq $ProfileAdmission -or [string]$ProfileAdmission.module_id -cne $ModuleId)) {
+    try { $ProfileAdmission = Get-AvidScriptCSharpProfileAdmission -Profile $ResolvedLanguageProfile -SemanticPath $SemanticArtifactPath -ModuleId $ModuleId }
+    catch {
+        Remove-LoadableArtifacts
+        $Diagnostics += [ordered]@{ code = 'ASBI4701'; severity = 'error'; message = $_.Exception.Message; file = $SourceId }
+        Write-BuildReport -Result 'semantic_failed' -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+        exit 1
+    }
+}
 
 $FrontendArtifactSha256 = Get-Sha256Hex $FrontendArtifactPath
 $SemanticSha256 = Get-Sha256Hex $SemanticArtifactPath
@@ -1761,6 +1832,8 @@ if (-not $CompilationCacheDisabledForBuild) {
             -Configuration $Configuration `
             -DataLaneFusion $DataLaneFusion `
             -DebugInstrumentation $ResolvedDebugInstrumentation `
+            -LanguageErrors $LanguageErrors `
+            -LanguageProfile $ResolvedLanguageProfile `
             -AuthorizationPackage $BindingAuthorizationInfo `
             -RuntimePackage $BindingPackageInfo
         $CompilationCache.key = [string]$CompilationCacheContext.CacheKey
@@ -1828,19 +1901,24 @@ if (-not $CompilationCacheHit) {
     ++$ToolInvocations.wasm_backend
     $GuestWorkerInvocation = $null
     if ($CompilerWorker.guest_stage_enabled -and -not $CooperativeSafepoints) {
+        $GuestWorkerFields = @{
+            semantic_path = $SemanticArtifactPath
+            guest_ir_path = $GuestIrArtifactPath
+            debug_map_path = $DebugMapArtifactPath
+            state_schema_path = $StateSchemaArtifactPath
+            wasm_path = $WasmArtifactPath
+            inspection_path = $WasmInspectionArtifactPath
+            frontend_artifact_sha256 = $FrontendArtifactSha256
+            data_lane_fusion = $DataLaneFusion
+            debug_instrumentation = $ResolvedDebugInstrumentation
+        }
+        if ($null -ne $ResolvedLanguageProfile) {
+            $GuestWorkerFields.language_profile = $ResolvedLanguageProfile.Identity
+            $GuestWorkerFields.module_id = $ModuleId
+        }
         $GuestWorkerInvocation = Invoke-BuildCompilerWorkerStage `
             -Stage "guest" `
-            -Fields @{
-                semantic_path = $SemanticArtifactPath
-                guest_ir_path = $GuestIrArtifactPath
-                debug_map_path = $DebugMapArtifactPath
-                state_schema_path = $StateSchemaArtifactPath
-                wasm_path = $WasmArtifactPath
-                inspection_path = $WasmInspectionArtifactPath
-                frontend_artifact_sha256 = $FrontendArtifactSha256
-                data_lane_fusion = $DataLaneFusion
-                debug_instrumentation = $ResolvedDebugInstrumentation
-            }
+            -Fields $GuestWorkerFields
         if ($GuestWorkerInvocation.RequiredFailure) {
             Write-BuildReport -Result "compiler_worker_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
             Write-Output "[AvidScript][CSharp][Worker] result=compiler_worker_failed stage=guest report=$ReportPath"
@@ -1870,6 +1948,7 @@ if (-not $CompilationCacheHit) {
             $CompilerArguments += @("-LanguageErrors", "bounded")
             $CompilerArguments += @("-ModuleId", $ModuleId)
         }
+        if ($null -ne $ResolvedLanguageProfile) { $CompilerArguments += @('-LanguageProfile', $LanguageProfile) }
         if ($CooperativeSafepoints) {
             $CompilerArguments += @(
                 "-CooperativeSafepoints",
@@ -1933,6 +2012,14 @@ if ($CooperativeSafepoints -and
     }
 }
 $GuestIrSucceeded = $null -ne $GuestIrModel -and [bool]$GuestIrModel.succeeded
+if ($null -ne $ProfileAdmission -and
+    ([string]$ProfileAdmission.semantic_sha256 -cne $SemanticSha256 -or
+        [string]$ProfileAdmission.guest_ir_sha256 -cne (Get-Sha256Hex $GuestIrArtifactPath))) {
+    Remove-LoadableArtifacts
+    $Diagnostics += [ordered]@{ code = 'ASBI4703'; severity = 'error'; message = 'Guest bytes differ from C# profile source admission.'; file = $SourceId }
+    Write-BuildReport -Result 'guest_ir_contract_invalid' -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+    exit 1
+}
 $DebugMapPublished = $null -ne $DebugMapModel -and (Test-Path -LiteralPath $DebugMapArtifactPath -PathType Leaf)
 if ($CompilerExitCode -ne 0 -or -not $GuestIrSucceeded -or -not $DebugMapPublished -or -not $StateSchemaArtifactExists -or $null -eq $WasmInspectionModel -or
     ($CooperativeSafepoints -and $null -eq $SafepointAttestationModel) -or
@@ -2289,6 +2376,17 @@ $GuestContractValid = [int]$GuestIrModel.schema_version -eq $ExpectedGuestSchema
     [bool]$GuestIrModel.succeeded -and
     [string]$GuestIrModel.provenance.semantic_sha256 -eq $SemanticSha256 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256
+if ($null -ne $ProfileAdmission) {
+    $GuestContractValid = [int]$GuestIrModel.schema_version -eq [int]$ProfileAdmission.guest_schema_version -and
+        [string]$GuestIrModel.ir_version -ceq [string]$ProfileAdmission.guest_ir_version -and
+        [string]$ProfileAdmission.source_sha256 -ceq [string]$FrontendModel.source.sha256 -and
+        [string]$ProfileAdmission.frontend_source_sha256 -ceq [string]$FrontendModel.source.sha256 -and
+        [string]$ProfileAdmission.source_id -ceq $SourceId -and
+        [string]$ProfileAdmission.module_id -ceq $ModuleId -and
+        [string]$ProfileAdmission.guest_ir_sha256 -ceq (Get-Sha256Hex $GuestIrArtifactPath) -and
+        [string]$ProfileAdmission.semantic_sha256 -ceq $SemanticSha256 -and
+        [bool]$GuestIrModel.succeeded
+}
 $DebugImportedFunctionCount = -1
 $DebugDefinedFunctionCount = -1
 $ExpectedDebugImportedFunctionCount =

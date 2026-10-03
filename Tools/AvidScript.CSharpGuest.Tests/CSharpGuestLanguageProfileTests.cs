@@ -44,7 +44,7 @@ internal static class CSharpGuestLanguageProfileTests
         string[] names = { "source.cs", "facade.cs", "frontend.json", "semantic-cli.json", "semantic-worker.json",
             "cli.guest.json", "cli.state.json", "cli.debug.json", "cli.wasm", "cli.offsets.json", "cli.inspect.json",
             "worker.guest.json", "worker.state.json", "worker.debug.json", "worker.wasm", "worker.inspect.json", "worker.debug.json.offsets.json",
-            "wire-semantic.json", "wire-guest.json" };
+            "wire-semantic.json", "wire-guest.json", "full.guest.json", "full.state.json", "full.debug.json" };
         try
         {
             File.WriteAllText(PathOf("facade.cs"), CSharpGuestCancellationTokenTests.AsyncFacade);
@@ -83,6 +83,20 @@ internal static class CSharpGuestLanguageProfileTests
                 Check(GuestCommandLine.Run(new[] { "--semantic", PathOf("semantic-cli.json"), "--output", PathOf("cli.guest.json"),
                     "--state-schema", PathOf("cli.state.json"), "--debug-map", PathOf("cli.debug.json"), "--frontend-artifact-sha256", Hash(frontendBytes),
                     "--module-id", "gameplay_profile_test", "--language-profile", profile.Name }) == 0, label + " single-option Guest CLI");
+                using (var admission = JsonDocument.Parse(CSharpLanguageProfileAdmission.Describe(profile.Name, semanticBytes, "gameplay_profile_test")))
+                {
+                    var record = admission.RootElement;
+                    Check(record.GetProperty("guest_ir_sha256").GetString() == Hash(File.ReadAllBytes(PathOf("cli.guest.json")))
+                        && record.GetProperty("semantic_sha256").GetString() == Hash(semanticBytes), label + " owner admission covers exact source and Guest bytes");
+                    Check(record.GetProperty("semantic_succeeded").GetBoolean() == api.Succeeded
+                        && record.GetProperty("source_id").GetString() == SourceId, label + " admission preserves source diagnostics and identity");
+                    using var admissionOutput = new StringWriter();
+                    int admissionExit;
+                    try { Console.SetOut(admissionOutput); admissionExit = GuestCommandLine.Run(new[] { "--validate-language-profile", profile.Name,
+                        "--semantic", PathOf("semantic-cli.json"), "--module-id", "gameplay_profile_test" }); }
+                    finally { Console.SetOut(previousOutput); }
+                    Check(admissionExit == 0 && admissionOutput.ToString().Trim() == admission.RootElement.GetRawText(), label + " public read-only admission matches the API");
+                }
                 Check(WasmBackendCommandLine.Run(new[] { PathOf("cli.guest.json"), PathOf("cli.wasm"), "--debug-offsets", PathOf("cli.offsets.json") }) == 0
                     && GuestCommandLine.Run(new[] { "--finalize-debug-map", PathOf("cli.debug.json"), "--offset-map", PathOf("cli.offsets.json") }) == 0
                     && WasmBackendCommandLine.Run(new[] { "--inspect", PathOf("cli.wasm"), PathOf("cli.inspect.json") }) == 0, label + " finalized CLI artifacts");
@@ -134,6 +148,24 @@ internal static class CSharpGuestLanguageProfileTests
                 && GuestCommandLine.Run(new[] { "--semantic", PathOf("semantic-cli.json"), "--output", PathOf("cli.guest.json"), "--state-schema", PathOf("cli.state.json"),
                     "--debug-map", PathOf("cli.debug.json"), "--frontend-artifact-sha256", Hash(legacyFrontend) }) == 0
                 && File.ReadAllBytes(PathOf("cli.guest.json")).SequenceEqual(File.ReadAllBytes(PathOf("worker.guest.json"))), "legacy Guest pipeline remains byte-identical");
+            byte[] validSource = File.ReadAllBytes(PathOf("semantic-worker.json"));
+            var unsupported = SemanticSerializer.Deserialize(validSource) with { SemanticVersion = "unsupported" };
+            bool sourceRejected = false;
+            try { CSharpLanguageProfileAdmission.Describe(profile.Name, SemanticSerializer.Serialize(unsupported)); }
+            catch (InvalidDataException) { sourceRejected = true; }
+            Check(sourceRejected, "owner admission rejects an unsupported source contract");
+            byte[] priorGuest = File.ReadAllBytes(PathOf("cli.guest.json"));
+            Check(GuestCommandLine.Run(new[] { "--validate-language-profile", "gameplay-v2", "--semantic", PathOf("semantic-worker.json") }) == 2
+                && priorGuest.SequenceEqual(File.ReadAllBytes(PathOf("cli.guest.json"))), "invalid read-only admission preserves existing publications");
+            Check(GuestCommandLine.Run(new[] { "--semantic", PathOf("semantic-worker.json"), "--output", PathOf("full.guest.json"),
+                "--state-schema", PathOf("full.state.json"), "--debug-map", PathOf("full.debug.json"), "--frontend-artifact-sha256", Hash(legacyFrontend),
+                "--data-lane-fusion", "enabled", "--debug-instrumentation", "disabled", "--implicit-function-import-count", "1",
+                "--language-errors", "bounded", "--module-id", "full-options", "--language-profile", profile.Name }) == 0,
+                "profile accepts all compatible options including the implicit safepoint import");
+            var fullModule = GuestIrSerializer.Deserialize(File.ReadAllBytes(PathOf("full.guest.json")));
+            Check(GuestModuleValidator.Validate(fullModule).Succeeded
+                && CSharpGuestDebugMapSerializer.Deserialize(File.ReadAllBytes(PathOf("full.debug.json"))).ImportedFunctionCount == fullModule.Imports.Count + 1,
+                "full option set preserves a valid IR and accounts for the implicit import in debug maps");
             foreach (string option in new[] { "--static-initialization", "--async-catch-variables", "--async-void-error-owner" })
                 Check(SemanticCommandLine.Run(new[] { "--source", PathOf("source.cs"), "--source-id", SourceId, "--frontend", PathOf("frontend.json"),
                     "--output", PathOf("semantic-cli.json"), "--language-profile", profile.Name, option, "disabled" }) == 2,

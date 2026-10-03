@@ -117,6 +117,8 @@ function Get-AvidScriptCSharpCompilationCacheContext {
         [Parameter(Mandatory = $true)][string]$Configuration,
         [Parameter(Mandatory = $true)][string]$DataLaneFusion,
         [Parameter(Mandatory = $true)][string]$DebugInstrumentation,
+        [ValidateSet('disabled', 'bounded')][string]$LanguageErrors = 'disabled',
+        [AllowNull()][object]$LanguageProfile,
         [AllowNull()][object]$AuthorizationPackage,
         [AllowNull()][object]$RuntimePackage
     )
@@ -168,6 +170,16 @@ function Get-AvidScriptCSharpCompilationCacheContext {
         authorization = Get-AvidScriptCompilationCachePackageIdentity $AuthorizationPackage
         runtime = Get-AvidScriptCompilationCachePackageIdentity $RuntimePackage
     }
+    if ($null -ne $LanguageProfile) {
+        $Identity.language_profile = $LanguageProfile.Identity
+        $Identity.profile_owner = Get-AvidScriptCSharpProfileToolIdentity $LanguageProfile
+        if ($DataLaneFusion -cne $LanguageProfile.Definition.execution.data_lane_fusion -or
+            $DebugInstrumentation -cne $LanguageProfile.Definition.execution.debug_instrumentation -or
+            $LanguageErrors -cne $LanguageProfile.Definition.execution.language_errors) {
+            Fail-AvidScriptCSharpCompilationCache -Code 'ASBI4601' -Message 'Compilation policy conflicts with its language profile.'
+        }
+    }
+    if ($LanguageErrors -cne 'disabled') { $Identity.language_errors = $LanguageErrors }
     $CacheKey = Get-AvidScriptUtf8JsonSha256 $Identity
     $EntryDirectory = Join-Path $CacheRootFullPath $CacheKey
     return [pscustomobject]@{
@@ -176,6 +188,8 @@ function Get-AvidScriptCSharpCompilationCacheContext {
         ToolchainFingerprint = $ToolchainFingerprint
         SemanticSha256 = $SemanticSha256
         ModuleId = $ModuleId
+        LanguageProfile = $LanguageProfile
+        LanguageErrors = $LanguageErrors
         EntryDirectory = $EntryDirectory
         EntryReportPath = Join-Path $EntryDirectory "entry.json"
     }
@@ -243,6 +257,16 @@ function Read-AvidScriptCompilationCacheEntry {
         -Code "ASBI4602" `
         -Message "Compilation cache entry identity differs from the current build."
 
+    try {
+        $ObservedProfile = $Report.PSObject.Properties['language_profile']
+        Assert-AvidScriptCSharpProfileIdentity `
+            -Expected $(if ($null -ne $Context.LanguageProfile) { $Context.LanguageProfile.Identity } else { $null }) `
+            -Actual $(if ($null -ne $ObservedProfile) { $ObservedProfile.Value } else { $null })
+        $ObservedPolicy = $Report.PSObject.Properties['language_errors']
+        $ObservedErrors = if ($null -eq $ObservedPolicy) { 'disabled' } else { [string]$ObservedPolicy.Value }
+        if ($ObservedErrors -cne $Context.LanguageErrors) { throw 'Compilation cache language error policy differs.' }
+    }
+    catch { Fail-AvidScriptCSharpCompilationCache -Code 'ASBI4602' -Message $_.Exception.Message }
     $ArtifactPaths = [ordered]@{}
     foreach ($Property in (Get-AvidScriptCompilationCacheArtifactLayout).GetEnumerator()) {
         $Artifact = $Report.artifacts.PSObject.Properties[$Property.Key].Value
@@ -430,6 +454,8 @@ function Publish-AvidScriptCSharpCompilationCacheEntry {
             module_id = $Context.ModuleId
             artifacts = $ArtifactReport
         }
+        if ($null -ne $Context.LanguageProfile) { $Report.language_profile = $Context.LanguageProfile.Identity }
+        if ($Context.LanguageErrors -cne 'disabled') { $Report.language_errors = $Context.LanguageErrors }
         $StagingReportPath = Join-Path $Staging "entry.json"
         [System.IO.File]::WriteAllText(
             $StagingReportPath,

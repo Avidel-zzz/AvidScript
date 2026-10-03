@@ -97,6 +97,7 @@ function Get-AvidScriptCompilerWorkerContext {
         [Parameter(Mandatory = $true)][string]$PluginRoot,
         [Parameter(Mandatory = $true)][string]$DotNetPath,
         [Parameter(Mandatory = $true)][string]$Configuration,
+        [string]$ProjectRoot = '',
         [ValidateRange(1, 300)][int]$RequestTimeoutSeconds = 30,
         [ValidateRange(5, 3600)][int]$IdleTimeoutSeconds = 300
     )
@@ -107,7 +108,8 @@ function Get-AvidScriptCompilerWorkerContext {
         -PluginRoot $PluginRoot `
         -DotNetPath $DotNetPath
     $RepositoryIdentity = Get-AvidScriptCompilerWorkerTextSha256 (
-        $PluginRoot.ToLowerInvariant() + "`n" + $Configuration + "`n" + $Fingerprint)
+        $PluginRoot.ToLowerInvariant() + "`n" + $Configuration + "`n" + $Fingerprint +
+        $(if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { '' } else { "`n" + [IO.Path]::GetFullPath($ProjectRoot).ToLowerInvariant() }))
     $ToolRoot = Join-Path $PluginRoot "Saved\AvidScriptCompilerWorkerTool\$Configuration"
     return [pscustomobject]@{
         ProtocolVersion = $script:AvidScriptCompilerWorkerProtocolVersion
@@ -157,6 +159,7 @@ function Build-AvidScriptCompilerWorker {
     New-Item -ItemType Directory -Force -Path $Context.ToolRoot | Out-Null
     $RawOutput = @(& $Context.DotNetPath build $Context.WorkerProjectPath `
         --configuration $Context.Configuration `
+        --no-restore --disable-build-servers -m:1 -nodeReuse:false -p:UseSharedCompilation=false `
         --nologo `
         --verbosity quiet 2>&1)
     $ExitCode = $LASTEXITCODE
@@ -227,32 +230,25 @@ function Invoke-AvidScriptCompilerWorkerRaw {
         [System.IO.Pipes.PipeOptions]::Asynchronous)
     try {
         $Pipe.Connect($ConnectTimeoutMilliseconds)
-        $Writer = [System.IO.StreamWriter]::new(
-            $Pipe,
-            [System.Text.UTF8Encoding]::new($false),
-            4096,
-            $true)
         $Reader = [System.IO.StreamReader]::new(
             $Pipe,
             [System.Text.UTF8Encoding]::new($false, $true),
             $false,
             4096,
             $true)
+        $ResponseCancellation = [System.Threading.CancellationTokenSource]::new()
+        $ResponseCancellation.CancelAfter($ResponseTimeoutMilliseconds)
         try {
-            $Writer.NewLine = "`n"
-            $Writer.WriteLine(($Request | ConvertTo-Json -Compress -Depth 12))
-            $Writer.Flush()
-            $ResponseCancellation = [System.Threading.CancellationTokenSource]::new()
-            $ResponseCancellation.CancelAfter($ResponseTimeoutMilliseconds)
             try {
+                # One deadline covers writing and reading. A connected but
+                # unresponsive peer must not block a synchronous writer flush.
+                $Bytes = [Text.UTF8Encoding]::new($false).GetBytes(($Request | ConvertTo-Json -Compress -Depth 12) + "`n")
+                $null = $Pipe.WriteAsync($Bytes, 0, $Bytes.Length, $ResponseCancellation.Token).GetAwaiter().GetResult()
                 $Line = $Reader.ReadLineAsync($ResponseCancellation.Token).AsTask().GetAwaiter().GetResult()
             }
             catch [System.OperationCanceledException] {
                 throw [System.TimeoutException]::new(
-                    "ASCW3004: Compiler worker response timed out after $ResponseTimeoutMilliseconds ms.")
-            }
-            finally {
-                $ResponseCancellation.Dispose()
+                    "ASCW3004: Compiler worker exchange timed out after $ResponseTimeoutMilliseconds ms.")
             }
             if ([string]::IsNullOrWhiteSpace($Line) -or
                 $Line.Length -gt $script:AvidScriptCompilerWorkerMaximumMessageCharacters) {
@@ -261,8 +257,8 @@ function Invoke-AvidScriptCompilerWorkerRaw {
             $Response = $Line | ConvertFrom-Json
         }
         finally {
+            $ResponseCancellation.Dispose()
             $Reader.Dispose()
-            $Writer.Dispose()
         }
     }
     finally {
@@ -335,6 +331,7 @@ function Start-AvidScriptCompilerWorkerProcess {
         -RedirectStandardOutput $StdoutPath `
         -RedirectStandardError $StderrPath `
         -PassThru
+    if (-not $Process.HasExited) { $Process.PriorityClass = [Diagnostics.ProcessPriorityClass]::BelowNormal }
     return $Process
 }
 
@@ -345,6 +342,8 @@ function Initialize-AvidScriptCompilerWorker {
         ([string]$Context.ToolchainFingerprint).Substring(0, 24)
     $Mutex = [System.Threading.Mutex]::new($false, $MutexName)
     $Acquired = $false
+    $OwnedProcess = $null
+    $Ready = $false
     try {
         try {
             $Acquired = $Mutex.WaitOne([int]$Context.RequestTimeoutMilliseconds)
@@ -366,7 +365,7 @@ function Initialize-AvidScriptCompilerWorker {
                 -ResponseTimeoutMilliseconds 1000
         }
         catch {
-            $Process = Start-AvidScriptCompilerWorkerProcess -Context $Context
+            $OwnedProcess = Start-AvidScriptCompilerWorkerProcess -Context $Context
             $Context.WorkerStarted = $true
             $Deadline = [System.DateTime]::UtcNow.AddMilliseconds(
                 [System.Math]::Min(10000, [int]$Context.RequestTimeoutMilliseconds))
@@ -384,7 +383,7 @@ function Initialize-AvidScriptCompilerWorker {
                 }
                 catch {
                     $LastError = $_.Exception.Message
-                    if ($Process.HasExited) {
+                    if ($OwnedProcess.HasExited) {
                         break
                     }
                 }
@@ -398,9 +397,16 @@ function Initialize-AvidScriptCompilerWorker {
         }
         $Context.WorkerInstanceId = [string]$Ping.worker_instance_id
         $Context.WorkerProcessId = [int]$Ping.worker_process_id
+        $Ready = $true
         return $Context
     }
     finally {
+        # Only the process created by this initialization belongs to this owner.
+        # An existing worker that failed a handshake is never terminated here.
+        if (-not $Ready -and $null -ne $OwnedProcess -and -not $OwnedProcess.HasExited) {
+            $OwnedProcess.Kill()
+            $null = $OwnedProcess.WaitForExit(3000)
+        }
         if ($Acquired) {
             $Mutex.ReleaseMutex()
         }

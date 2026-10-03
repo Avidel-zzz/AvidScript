@@ -27,6 +27,8 @@ public static class GuestCommandLine
                 return 0;
             }
 
+            if (args.Length > 0 && args[0] is "--validate-language-profile" or "--describe-language-profile")
+                return CSharpLanguageProfileAdmission.Run(args);
             IReadOnlyDictionary<string, string> options = ParseOptions(args);
             string semanticPath = options["--semantic"];
             outputPath = options["--output"];
@@ -62,80 +64,16 @@ public static class GuestCommandLine
             byte[] artifact = File.ReadAllBytes(semanticPath);
             string semanticSha256 = Convert.ToHexString(SHA256.HashData(artifact)).ToLowerInvariant();
             SemanticDocument document = SemanticArtifactReader.Deserialize(artifact);
-            GuestModule? module;
-            bool capabilityCompilerRequired = CSharpLanguageCapabilityCompiler.IsRequired(document);
-            bool asyncLanguageErrors = document.SchemaVersion
-                    == SemanticContract.AsyncLanguageErrorSchemaVersion
-                    && document.AsyncMethods.Any(method => method.ErrorPlan is not null)
-                || document.SchemaVersion
-                    is (SemanticContract.AsyncExceptionFlowSchemaVersion
-                        or SemanticContract.DirectAwaitCleanupSchemaVersion
-                        or SemanticContract.AsyncCancellationFlowSchemaVersion
-                        or SemanticContract.TaskLocalLifetimeSchemaVersion
-                        or SemanticContract.AsyncThrowRoutingSchemaVersion)
-                    && document.AsyncMethods.Any(method => method.ExceptionPlan is not null);
-            if (boundedLanguageErrors && (document.ExceptionFlows is { Count: > 0 }
-                    || asyncLanguageErrors || capabilityCompilerRequired)
-                && (!dataLaneFusionEnabled || debugInstrumentationEnabled))
-                throw new ArgumentException(
-                    "Bounded language errors require data-lane fusion enabled and debug instrumentation disabled.");
-            if (capabilityCompilerRequired)
+            var result = CSharpGuestCompiler.Compile(document, semanticSha256,
+                dataLaneFusionEnabled, debugInstrumentationEnabled, boundedLanguageErrors, requestedModuleId);
+            if (!result.Succeeded || result.Module is null)
             {
-                module = null;
-                string? error = null;
-                if (!boundedLanguageErrors || !CSharpLanguageCapabilityCompiler.TryLower(document, semanticSha256,
-                        out module, out error) || module is null)
-                {
-                    DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
-                    Console.Error.WriteLine($"ASCG1004: {(!boundedLanguageErrors
-                        ? "Language capability execution requires --language-errors bounded."
-                        : error ?? "Language capability lowering failed.")}");
-                    return 1;
-                }
+                DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
+                foreach (GuestDiagnostic diagnostic in result.Diagnostics)
+                    Console.Error.WriteLine($"{diagnostic.Code}: {diagnostic.Message}");
+                return 1;
             }
-            else if (boundedLanguageErrors && document.ExceptionFlows is { Count: > 0 }
-                && !asyncLanguageErrors)
-            {
-                if (!CSharpLanguageErrorCompiler.TryLower(document, semanticSha256,
-                        out CSharpLanguageErrorCompilation? compilation, out string? error)
-                    || compilation is null)
-                {
-                    DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
-                    Console.Error.WriteLine($"ASCG1004: {error ?? "Bounded language error lowering failed."}");
-                    return 1;
-                }
-                module = compilation.Module;
-            }
-            else
-            {
-                CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(
-                    document,
-                    semanticSha256,
-                    enableDataLaneFusion: dataLaneFusionEnabled,
-                    enableDebugInstrumentation: debugInstrumentationEnabled,
-                    enableAsyncLanguageErrors: boundedLanguageErrors && asyncLanguageErrors);
-                if (!result.Succeeded || result.Module is null)
-                {
-                    DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
-                    foreach (GuestDiagnostic diagnostic in result.Diagnostics)
-                        Console.Error.WriteLine($"{diagnostic.Code}: {diagnostic.Message}");
-                    return 1;
-                }
-                module = result.Module;
-            }
-
-            if (requestedModuleId is not null)
-            {
-                if (requestedModuleId.Length > 1024 || requestedModuleId.Any(char.IsControl))
-                    throw new ArgumentException(
-                        "--module-id must be at most 1024 characters and contain no control characters.");
-                module = module with { ModuleId = requestedModuleId };
-                GuestValidationResult validation = GuestModuleValidator.Validate(module);
-                if (!validation.Succeeded)
-                    throw new InvalidDataException(
-                        "ASCG1005: Requested module identity does not satisfy the Guest IR contract.");
-            }
-
+            GuestModule module = result.Module;
             CSharpGuestStateSchema? stateSchema = stateSchemaPath is null
                 ? null
                 : CSharpGuestStateSchemaProjector.Project(document, module);
@@ -187,10 +125,10 @@ public static class GuestCommandLine
 
     private static IReadOnlyDictionary<string, string> ParseOptions(string[] args)
     {
-        if (args.Length is < 4 or > 20 || args.Length % 2 != 0)
+        if (args.Length is < 4 or > 22 || args.Length % 2 != 0)
         {
             throw new ArgumentException(
-                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>] [--data-lane-fusion enabled|disabled] [--debug-instrumentation enabled|disabled] [--implicit-function-import-count <0..16>] [--language-errors disabled|bounded] [--module-id <id>] | --finalize-debug-map <path> --offset-map <path>");
+                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>] [--data-lane-fusion enabled|disabled] [--debug-instrumentation enabled|disabled] [--implicit-function-import-count <0..16>] [--language-errors disabled|bounded] [--module-id <id>] [--language-profile gameplay-v1] | --validate-language-profile <name> --semantic <path> [--module-id <id>] | --describe-language-profile <name> | --finalize-debug-map <path> --offset-map <path>");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
