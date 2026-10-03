@@ -44,6 +44,8 @@ public static class CSharpGuestLowerer
         var synchronousAsync = CSharpAsyncSynchronousExecutionContext.Find(document);
         if ((document.SchemaVersion == SemanticContract.AsyncVoidErrorOwnerSchemaVersion
             || document.SemanticVersion == SemanticContract.AsyncVoidErrorOwnerSemanticVersion
+            || document.SchemaVersion == SemanticComposableCapabilities.AsyncVoidSchemaVersion
+            || document.SemanticVersion == SemanticComposableCapabilities.AsyncVoidSemanticVersion
             || document.AsyncMethods?.Any(method => method?.VoidErrorOwner is not null) == true)
             && synchronousAsync is not { HasVoidErrorOwners: true })
             return Failure(new[] { new GuestDiagnostic("ASCG1030", "error",

@@ -78,6 +78,9 @@ public sealed record GuestModule(
 
     [JsonPropertyOrder(30), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public GuestAsyncVoidErrorOwnerPlan? AsyncVoidErrorOwners { get; init; }
+
+    [JsonPropertyOrder(31), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GuestAsyncVoidCompositionPlan? AsyncVoidComposition { get; init; }
 }
 
 // IR 25 binds the new compiler ownership profile to the concrete release and

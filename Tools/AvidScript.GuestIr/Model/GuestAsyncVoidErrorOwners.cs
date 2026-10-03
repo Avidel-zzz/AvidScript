@@ -9,16 +9,31 @@ public static class GuestAsyncVoidErrorOwners
     public const string IrVersion = "1.35";
     public const int SemanticSchemaVersion = 55;
     public const string SemanticVersion = "1.64";
+    public const int CompositionSchemaVersion = 37;
+    public const string CompositionIrVersion = "1.36";
+    public const int CompositionSemanticSchemaVersion = 56;
+    public const string CompositionSemanticVersion = "1.65";
     public const string CapabilityId = "error.async_void_owner";
     public const string ReportImportId = "import:language_error_report_v1";
 
     public static bool IsVersion(GuestModule module) =>
-        module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion;
+        module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion
+        || IsCompositionVersion(module);
+
+    public static bool IsCompositionVersion(GuestModule module) =>
+        module.SchemaVersion == CompositionSchemaVersion && module.IrVersion == CompositionIrVersion;
 
     public static bool HasSourceContract(GuestModule module) => IsVersion(module)
-        && module.Language == "csharp" && module.Provenance is {
-            SemanticSchemaVersion: SemanticSchemaVersion, SemanticVersion: SemanticVersion };
+        && module.Language == "csharp" && (IsCompositionVersion(module)
+            ? module.Provenance is { SemanticSchemaVersion: CompositionSemanticSchemaVersion, SemanticVersion: CompositionSemanticVersion }
+            : module.Provenance is { SemanticSchemaVersion: SemanticSchemaVersion, SemanticVersion: SemanticVersion });
 }
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record GuestAsyncVoidCompositionPlan(
+    [property: JsonPropertyOrder(0), JsonRequired] int ContractVersion,
+    [property: JsonPropertyOrder(1), JsonRequired] int SourceBaseSchemaVersion,
+    [property: JsonPropertyOrder(2), JsonRequired] string SourceBaseSemanticVersion);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record GuestAsyncVoidErrorOwnerPlan(

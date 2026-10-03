@@ -11,6 +11,8 @@ public static class SemanticComposableCapabilities
 {
     public const int SchemaVersion = 54;
     public const string SemanticVersion = "1.63";
+    public const int AsyncVoidSchemaVersion = 56;
+    public const string AsyncVoidSemanticVersion = "1.65";
     public const int SynchronousBaseSchemaVersion = SemanticContract.CurrentSchemaVersion;
     public const string SynchronousBaseSemanticVersion = SemanticContract.CurrentSemanticVersion;
     public const int AsyncBaseSchemaVersion = SemanticContract.AsyncSynchronousExceptionSchemaVersion;
@@ -21,9 +23,14 @@ public static class SemanticComposableCapabilities
     public const string CancellationIdentity = "async.cancellation_identity";
     public const string ExceptionValues = "error.exception_values";
     public const string CancellationTokenValue = "error.cancellation_token_value";
+    public const string AsyncVoidOwner = "error.async_void_owner";
+
+    public static bool IsAsyncVoidVersion(SemanticDocument document) =>
+        document.SchemaVersion == AsyncVoidSchemaVersion && document.SemanticVersion == AsyncVoidSemanticVersion;
 
     public static bool IsVersion(SemanticDocument document) =>
-        document.SchemaVersion == SchemaVersion && document.SemanticVersion == SemanticVersion;
+        document.SchemaVersion == SchemaVersion && document.SemanticVersion == SemanticVersion
+        || IsAsyncVoidVersion(document);
 
     public static bool Has(SemanticDocument document, string id) =>
         IsVersion(document) && document.CapabilityManifest?.Capabilities?.Any(capability =>
@@ -43,9 +50,13 @@ public static class SemanticComposableCapabilities
             capabilities.Add(new(ExceptionValues, 1));
         if (UsesTokenValues(document.Symbols, document.Methods, document.AsyncMethods))
             capabilities.Add(new(CancellationTokenValue, 1));
+        bool voidOwners = document.AsyncMethods.Any(method => method.VoidErrorOwner is not null);
+        if (voidOwners) capabilities.Add(new(AsyncVoidOwner, 1));
         bool asynchronous = document.AsyncMethods.Count != 0;
-        return new(asynchronous ? AsyncBaseSchemaVersion : SynchronousBaseSchemaVersion,
-            asynchronous ? AsyncBaseSemanticVersion : SynchronousBaseSemanticVersion,
+        return new(voidOwners ? SemanticContract.AsyncVoidErrorOwnerSchemaVersion
+                : asynchronous ? AsyncBaseSchemaVersion : SynchronousBaseSchemaVersion,
+            voidOwners ? SemanticContract.AsyncVoidErrorOwnerSemanticVersion
+                : asynchronous ? AsyncBaseSemanticVersion : SynchronousBaseSemanticVersion,
             capabilities.OrderBy(capability => capability.Id, StringComparer.Ordinal).ToArray());
     }
 

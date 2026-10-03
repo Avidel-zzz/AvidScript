@@ -55,7 +55,8 @@ int32 ExecutionSchema(const FString& Profile)
 FString ExecutionProfile(const TMap<FString, FString>& Fields)
 {
 	if (Fields.FindRef(TEXT("guest_ir")) == TEXT("35/1.34")
-		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("36/1.35"))
+		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("36/1.35")
+		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("37/1.36"))
 	{
 		const FString Base = Fields.FindRef(TEXT("execution_base"));
 		return Base == TEXT("29/1.28") ? TEXT("26/1.25") : Base;
@@ -102,8 +103,10 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 		OutFields.Add(MoveTemp(Key), Line.Mid(Separator + 1));
 	}
 	const FString ArtifactProfile = OutFields.FindRef(TEXT("guest_ir"));
-	if (ArtifactProfile.StartsWith(TEXT("36/"), ESearchCase::CaseSensitive))
+	if (ArtifactProfile.StartsWith(TEXT("36/"), ESearchCase::CaseSensitive)
+		|| ArtifactProfile.StartsWith(TEXT("37/"), ESearchCase::CaseSensitive))
 	{
+		const bool bComposition = ArtifactProfile == TEXT("37/1.36");
 		const FString RawCapabilities = OutFields.FindRef(TEXT("capabilities"));
 		if (RawCapabilities.IsEmpty() || RawCapabilities.StartsWith(TEXT(",")) || RawCapabilities.EndsWith(TEXT(","))) return false;
 		TArray<FString> Capabilities;
@@ -122,10 +125,14 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 			Declared.Add(Capability);
 			Previous = Capability;
 		}
-		return ArtifactProfile == TEXT("36/1.35") && OutFields.Num() == 11
+		return (bComposition || ArtifactProfile == TEXT("36/1.35"))
+			&& OutFields.Num() == (bComposition ? 12 : 11)
 			&& OutFields.FindRef(TEXT("execution_base")) == TEXT("29/1.28")
 			&& OutFields.FindRef(TEXT("source_language")) == TEXT("csharp")
-			&& OutFields.FindRef(TEXT("semantic")) == TEXT("55/1.64")
+			&& OutFields.FindRef(TEXT("semantic")) == (bComposition ? TEXT("56/1.65") : TEXT("55/1.64"))
+			&& (!bComposition || (OutFields.FindRef(TEXT("source_execution")) == TEXT("55/1.64")
+				&& (Declared.Contains(TEXT("managed.static_storage@1"))
+					|| Declared.Contains(TEXT("error.cancellation_token_value@1")))))
 			&& OutFields.FindRef(TEXT("task_local_exception_model")) == TEXT("cancellation")
 			&& Declared.Contains(TEXT("error.async_void_owner@1"))
 			&& (!Declared.Contains(TEXT("error.exception_values@1"))
@@ -274,7 +281,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		return false;
 	}
 	const FString ArtifactProfile = ProvenanceFields.FindRef(TEXT("guest_ir"));
-	if ((ArtifactProfile == TEXT("35/1.34") || ArtifactProfile == TEXT("36/1.35"))
+	if ((ArtifactProfile == TEXT("35/1.34") || ArtifactProfile == TEXT("36/1.35") || ArtifactProfile == TEXT("37/1.36"))
 		&& (ExpectedModuleId.IsEmpty() || ProvenanceFields.FindRef(TEXT("module_id")) != ExpectedModuleId))
 	{
 		OutError = TEXT("Composed IR provenance module identity does not match the loaded artifact");
@@ -333,7 +340,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 36, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 37, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
 		|| FString::Printf(TEXT("%d/%s"), GuestSchema, *GuestVersion) != ArtifactProfile
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId
@@ -359,7 +366,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const bool bComposableAsync = ArtifactProfile == TEXT("35/1.34")
 		&& ProvenanceFields.FindRef(TEXT("execution_base")) == TEXT("29/1.28");
 	Candidate->bExceptionCancellationToken = ArtifactProfile == TEXT("34/1.33") || bComposableAsync;
-	const bool bVoidOwners = ArtifactProfile == TEXT("36/1.35");
+	const bool bVoidOwners = ArtifactProfile == TEXT("36/1.35") || ArtifactProfile == TEXT("37/1.36");
 	TArray<FString> Declared;
 	if (bVoidOwners) ProvenanceFields.FindRef(TEXT("capabilities")).ParseIntoArray(Declared, TEXT(","), false);
 	Candidate->bAsyncVoidErrorOwner = bVoidOwners;

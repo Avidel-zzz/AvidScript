@@ -22,10 +22,12 @@ public static class GuestComposableCapabilities
         || GuestAsyncVoidErrorOwners.IsVersion(module);
 
     public static int ExpectedSemanticSchema(GuestModule module) =>
-        GuestAsyncVoidErrorOwners.IsVersion(module) ? GuestAsyncVoidErrorOwners.SemanticSchemaVersion : 54;
+        GuestAsyncVoidErrorOwners.IsCompositionVersion(module) ? GuestAsyncVoidErrorOwners.CompositionSemanticSchemaVersion
+            : GuestAsyncVoidErrorOwners.IsVersion(module) ? GuestAsyncVoidErrorOwners.SemanticSchemaVersion : 54;
 
     public static string ExpectedSemanticVersion(GuestModule module) =>
-        GuestAsyncVoidErrorOwners.IsVersion(module) ? GuestAsyncVoidErrorOwners.SemanticVersion : "1.63";
+        GuestAsyncVoidErrorOwners.IsCompositionVersion(module) ? GuestAsyncVoidErrorOwners.CompositionSemanticVersion
+            : GuestAsyncVoidErrorOwners.IsVersion(module) ? GuestAsyncVoidErrorOwners.SemanticVersion : "1.63";
 
     public static bool Has(GuestModule module, string capabilityId) =>
         IsVersion(module) && module.CapabilityManifest?.Capabilities?.Any(capability =>

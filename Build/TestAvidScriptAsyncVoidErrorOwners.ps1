@@ -2,7 +2,8 @@
 param(
     [string]$EngineRoot = 'C:\UnrealEngine',
     [string]$DotNetPath = (Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'),
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$Composition
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,10 +47,12 @@ try {
     & $DotNetPath build $testProject -c Release --no-restore --disable-build-servers -m:1 -nodeReuse:false `
         -p:UseSharedCompilation=false --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw 'Single-node managed build failed. No SDK or workload installation was attempted.' }
-    $managed = @(& $DotNetPath run --project $testProject -c Release --no-build --no-restore -- --async-void-error-owners)
+    $managedArgument = if ($Composition) { '--async-void-composition' } else { '--async-void-error-owners' }
+    $managedLabel = if ($Composition) { 'AsyncVoidComposition' } else { 'AsyncVoidErrorOwners' }
+    $managed = @(& $DotNetPath run --project $testProject -c Release --no-build --no-restore -- $managedArgument)
     $managedExit = $LASTEXITCODE
     $managed | Set-Content -LiteralPath (Join-Path $runRoot 'managed.log') -Encoding utf8
-    $match = [regex]::Match(($managed -join "`n"), 'AvidScript.CSharpGuest.Tests.AsyncVoidErrorOwners: (\d+)/(\d+) passed')
+    $match = [regex]::Match(($managed -join "`n"), 'AvidScript\.CSharpGuest\.Tests\.' + $managedLabel + ': (\d+)/(\d+) passed')
     if ($managedExit -ne 0 -or -not $match.Success -or $match.Groups[1].Value -cne $match.Groups[2].Value) {
         throw "Same-source async void fixture generation failed: $runRoot"
     }
@@ -77,6 +80,7 @@ try {
     $tests = @(
         'AvidScript.Runtime.Continuation.CompiledAsyncVoidErrorOwners'
         'AvidScript.Runtime.LanguageErrorCatalog.AsyncVoidAdmission'
+        'AvidScript.Runtime.LanguageErrorCatalog.AsyncVoidCompositionAdmission'
         'AvidScript.Runtime.LanguageErrorCatalog.AsyncVoidCheckedReport'
         'AvidScript.Runtime.LanguageErrorCatalog.LoadAndReject'
         'AvidScript.Runtime.LanguageErrorCatalog.TaskFaultVmImport'
@@ -112,8 +116,8 @@ try {
     }
     [ordered]@{
         schema_version = 1
-        semantic_version = '55/1.64'
-        guest_ir_version = '36/1.35'
+        semantic_version = $(if ($Composition) { '56/1.65' } else { '55/1.64' })
+        guest_ir_version = $(if ($Composition) { '37/1.36' } else { '36/1.35' })
         sdk = $sdk
         managed_passed = [int]$match.Groups[1].Value
         native_tests_passed = $passed

@@ -28,7 +28,8 @@ internal sealed class CSharpCancellationTokenExecutionContext
     {
         execution = null;
         context = null;
-        if (source.Source is null || source.Diagnostics is null || source.Diagnostics.Any(item => item is null)
+        if (source.Source is null || source.StaticInitialization is not null
+            || source.Diagnostics is null || source.Diagnostics.Any(item => item is null)
             || source.Callables is null || source.Callables.Any(item => item is null)
             || source.Symbols is null || source.Symbols.Any(item => item is null)
             || source.ClassTypes is null || source.ClassTypes.Any(item => item is null)

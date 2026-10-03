@@ -41,7 +41,7 @@ internal static class CSharpGuestCancellationTokenReference
         }
     }
 
-    private const string Facade = """
+    internal const string Facade = """
         using System;
         using System.Collections.Generic;
         using System.Runtime.CompilerServices;

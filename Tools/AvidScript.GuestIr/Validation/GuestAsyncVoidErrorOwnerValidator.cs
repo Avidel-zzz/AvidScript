@@ -9,9 +9,14 @@ internal static class GuestAsyncVoidErrorOwnerValidator
     internal static void Validate(GuestValidationContext context)
     {
         var module = context.InputArtifact;
+        bool composed = GuestAsyncVoidErrorOwners.IsCompositionVersion(module);
+        if (composed ? module.AsyncVoidComposition is not { ContractVersion: 1,
+                SourceBaseSchemaVersion: 55, SourceBaseSemanticVersion: "1.64" }
+            : module.AsyncVoidComposition is not null)
+            Add("Async void composition requires its exact IR37 source-base marker; older artifacts cannot carry it.");
         if (!GuestAsyncVoidErrorOwners.IsVersion(module))
         {
-            if (module.AsyncVoidErrorOwners is not null) Add("Async void owners require IR 36/1.35.");
+            if (module.AsyncVoidErrorOwners is not null) Add("Async void owners require an exact paired IR36 or IR37 contract.");
             return;
         }
         if (!GuestAsyncVoidErrorOwners.HasSourceContract(module)

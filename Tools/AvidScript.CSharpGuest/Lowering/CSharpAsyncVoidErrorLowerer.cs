@@ -51,10 +51,18 @@ internal static class CSharpAsyncVoidErrorLowerer
         if (module.CancellationIdentity is not null) capabilities.Add(new(GuestComposableCapabilities.CancellationIdentity, 1));
         if (module.ExceptionValues is not null) capabilities.Add(new(GuestComposableCapabilities.ExceptionValues, 1));
         if (module.CancellationTokens is not null) capabilities.Add(new(GuestComposableCapabilities.CancellationTokenValue, 1));
+        bool composed = SemanticComposableCapabilities.IsAsyncVoidVersion(source);
+        bool staticBase29 = composed && module.StaticStorage is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" };
         return module with {
-            SchemaVersion = GuestAsyncVoidErrorOwners.SchemaVersion,
-            IrVersion = GuestAsyncVoidErrorOwners.IrVersion,
+            SchemaVersion = composed ? GuestAsyncVoidErrorOwners.CompositionSchemaVersion : GuestAsyncVoidErrorOwners.SchemaVersion,
+            IrVersion = composed ? GuestAsyncVoidErrorOwners.CompositionIrVersion : GuestAsyncVoidErrorOwners.IrVersion,
             AsyncVoidErrorOwners = new(owners),
+            AsyncVoidComposition = composed ? new(1, SemanticContract.AsyncVoidErrorOwnerSchemaVersion,
+                SemanticContract.AsyncVoidErrorOwnerSemanticVersion) : null,
+            DirectAwaitReadiness = staticBase29 && module.DirectAwaitReadiness is { BaseSchemaVersion: 30, BaseIrVersion: "1.29" } ready
+                ? ready with { BaseSchemaVersion = 29, BaseIrVersion = "1.28" } : module.DirectAwaitReadiness,
+            CancellationIdentity = staticBase29 && module.CancellationIdentity is { BaseSchemaVersion: 30, BaseIrVersion: "1.29" } identity
+                ? identity with { BaseSchemaVersion = 29, BaseIrVersion = "1.28" } : module.CancellationIdentity,
             CapabilityManifest = GuestCapabilityManifest.Create(29, "1.28", capabilities),
             Provenance = module.Provenance with {
                 SemanticSchemaVersion = source.SchemaVersion, SemanticVersion = source.SemanticVersion },

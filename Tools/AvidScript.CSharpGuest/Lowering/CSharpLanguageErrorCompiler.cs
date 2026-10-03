@@ -21,7 +21,7 @@ public static class CSharpLanguageErrorCompiler
             deferComposedValidation: false);
 
     // Only the validated static source compiler uses this private path. Its
-    // intermediate envelope is never published before final IR 35 validation.
+    // intermediate envelope is never published before final composition validation.
     internal static bool TryLower(
         SemanticDocument semantic,
         string semanticSha256,
@@ -35,12 +35,15 @@ public static class CSharpLanguageErrorCompiler
             return Fail("Expected a validated exception-flow artifact without unrelated errors.", out error);
         if ((semantic.SchemaVersion == SemanticContract.AsyncVoidErrorOwnerSchemaVersion
             || semantic.SemanticVersion == SemanticContract.AsyncVoidErrorOwnerSemanticVersion
+            || semantic.SchemaVersion == SemanticComposableCapabilities.AsyncVoidSchemaVersion
+            || semantic.SemanticVersion == SemanticComposableCapabilities.AsyncVoidSemanticVersion
             || semantic.AsyncMethods.Any(method => method?.VoidErrorOwner is not null))
             && !SemanticAsyncVoidErrorOwnerValidator.IsValid(semantic))
             return Fail("Async void error owners require the complete paired source contract.", out error);
         var tokenContext = semantic is null ? null : CSharpCancellationTokenExecutionContext.Find(semantic);
         if (semantic is not null && (semantic.SchemaVersion == GuestCancellationTokens.SemanticSchemaVersion
-            || semantic.SemanticVersion == GuestCancellationTokens.SemanticVersion) && tokenContext is null)
+            || semantic.SemanticVersion == GuestCancellationTokens.SemanticVersion
+            || SemanticContract.HasCancellationTokens(semantic)) && tokenContext is null)
             return Fail("Cancellation token source requires its composed execution compiler.", out error);
         if (semantic is not null && (semantic.SchemaVersion == SemanticContract.AsyncCatchVariableSchemaVersion
             || semantic.SemanticVersion == SemanticContract.AsyncCatchVariableSemanticVersion)

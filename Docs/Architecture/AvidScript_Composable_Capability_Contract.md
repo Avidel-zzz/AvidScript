@@ -1,6 +1,6 @@
 # 可组合语言能力合同：P66.C 到跨语言模块
 
-状态：P66.C 实现中，2026-09-28。本文规定下一段实现与验收，不改变已完成的 P66.A/B、既有 Phase 状态或已发布的 IR 1–34 产物。已预留 C# Semantic 54/1.63、Guest IR 35/1.34；不能重解释旧字节。
+状态：P66.C 实现中，2026-10-04。Semantic 54 / IR 35 的静态 + token 组合、Semantic 55 / IR 36 的 `async void` 错误 owner、Semantic 56 / IR 37 的 owner 与静态/token 组合已有专项验证。完整版本与证据见 [P66.C11](../Phase66/P66.C11_Async_Void_Error_Owner_Contract.md)、[P66.C12](../Phase66/P66.C12_Async_Void_Composition_Contract.md)。默认入口和共享类型域尚未完成；既有 IR 字节不重新解释。
 
 首个实现切片已在 Guest IR 中加入可选清单字段、精确执行基线/能力 ID 校验及 IR 35 严格 JSON 读取。旧版本不能携带新清单。Guest 验证器在未改写版本的手写 IR 35 夹具上核对同步 `managed.static_storage` + `error.cancellation_token_value`、14/1.13 基线、两种指令和 token 类型布局；缺计划、错基线、伪造静态槽、额外异步元数据及异常 token reader 均拒绝。现另准入精确的 29/1.28 五能力异步组合；其余组合仍拒绝。
 
@@ -34,9 +34,9 @@ C# 静态初始化不能简单映射到上述 14/1.13 夹具：现有编译器�
 
 ## 现有阻塞
 
-[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射特定的静态初始化 + async + token 组合。同一份 C# 源码现通过私有 Semantic 53 执行副本完成静态字段改写、异常/取消 lowering，发布保留 Semantic 54 来源的 IR 35 五能力模块，并生成确定性 WASM。原生 Host 已读取这份产物的来源和错误目录，双 VM 已执行正常完成、取消身份、独立 Session EndPlay，以及原始 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)全部的同源对照与挂起态 owner teardown。全部 29 场景也已走正式 Component 的双 VM Actor/World 销毁矩阵；独立双 Actor、加载/VM 校验失败、候选执行后注入失效与成功重载已有专项证据。语言错误自然触发的候选回滚、共享生成类型、默认入口和真实玩法仍待验证。
+[SemanticAnalyzer](../../Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs)可投射版本化的静态、async、token 和 `async void` 组合。原始 IR 35 的 [29 个成员 await 场景](../Phase66/P66.C10_Await_Member_Assignment_Contract.md#同源基准矩阵)已通过同源对照、挂起态 teardown 和正式 Component 双 VM Actor/World 销毁矩阵；IR 36 已验证语言错误自然触发的独立 Session 候选回滚。IR 37 又验证了 24 份静态/token/owner 组合源码及 192 条双 VM 生命周期路径。共享生成类型域的组合错误隔离/回滚、默认入口、真实 Editor Play 和玩法仍待验证。
 
-本次还暴露了独立语言缺口：现行同步异常合同只为 `Task<int>` 方法建立异常 owner；`async void` 导出入口中直接调用可能产生语言错误的 `AvidCancellationSource.Create()` 会被 `ASCG1026` 拒绝。不能只跳过该调用的 outcome 检查，也不能把未处理异常默默转成正常返回。后续需版本化 `async void` 的本地 catch、跨 await 错误根和未处理错误向 Session 报告的合同，再用同一入口源码验证。当前可运行场景把取消源创建放在实际业务 `Task<int>` 方法中，由导出入口等待它。
+早期 `async void` 缺少同步错误 owner 的问题已由 IR 36/37 合同处理。IR 37 同源场景在 `async void Run` 内直接创建取消源，执行标准 token await 和本地 catch；未处理错误经受检报告交给 Session，finally 和错误根释放先完成。该源码/Runtime 专项需要显式选项，默认 Build And Bind 仍未启用。
 
 token reader 验证器现可在真实 IR 35 输入上识别 29/1.28、Semantic 54、异常值与 token 值两项声明的组合，并拒绝缺声明、旧来源或同步 token 计划。同源候选先核对旧包装生成的静态、readiness、取消身份、token 与异常计划链，再把 readiness 和取消身份计划统一标记为 29/1.28；各独立验证器随后按原始 IR 35 模块检查执行路径。计划字段一致本身不能替代这一步。
 

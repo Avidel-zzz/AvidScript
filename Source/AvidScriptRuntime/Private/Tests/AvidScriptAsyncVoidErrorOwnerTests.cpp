@@ -47,6 +47,8 @@ bool FAvidScriptAsyncVoidErrorOwnerTest::RunTest(const FString& Parameters)
             FString Name, ModuleId, ErrorType;
             bool Cancel = false;
             int32 TraceOffset = -1, ExpectedTrace = 0;
+            int32 StaticRoots = 0;
+            bool StaticSuccessDeferred = false, StaticCacheFault = false, CacheDeferred = false;
             if (!TestTrue(TEXT("Fixture contains bounded unique identity and reference expectations"),
                 Value && Value->TryGetObject(Scenario) && Scenario && Scenario->IsValid()
                 && (*Scenario)->TryGetStringField(TEXT("name"), Name) && !Name.IsEmpty()
@@ -58,6 +60,14 @@ bool FAvidScriptAsyncVoidErrorOwnerTest::RunTest(const FString& Parameters)
                 && (*Scenario)->TryGetNumberField(TEXT("traceOffset"), TraceOffset)
                 && TraceOffset >= 0 && TraceOffset <= 65532)) return false;
             Names.Add(Name);
+            // These fields exist only on the composition fixtures. IR36 retains
+            // its original zero-resource assertions below.
+            (*Scenario)->TryGetNumberField(TEXT("staticRoots"), StaticRoots);
+            (*Scenario)->TryGetBoolField(TEXT("staticSuccessDeferred"), StaticSuccessDeferred);
+            (*Scenario)->TryGetBoolField(TEXT("staticCacheFault"), StaticCacheFault);
+            (*Scenario)->TryGetBoolField(TEXT("cacheDeferred"), CacheDeferred);
+            if (!TestTrue(TEXT("Static fixture expectations are bounded"), StaticRoots >= 0 && StaticRoots <= 256
+                && (StaticRoots > 0 || (!StaticSuccessDeferred && !StaticCacheFault && !CacheDeferred)))) return false;
             TArray<uint8> Bytes;
             if (!TestTrue(*Name, FFileHelper::LoadFileToArray(Bytes, *FPaths::Combine(Directory, Name + TEXT(".wasm"))))) return false;
             // Complete; retire during initial suspension; retire after first
@@ -170,18 +180,28 @@ bool FAvidScriptAsyncVoidErrorOwnerTest::RunTest(const FString& Parameters)
                 TestEqual(*(Label + TEXT(" waiters")), Owner->GetTaskResultsForTesting().GetWaiterCount(), 0);
                 TestEqual(*(Label + TEXT(" continuations")), Owner->GetActiveCount(), 0);
                 TestEqual(*(Label + TEXT(" state frames")), Owner->GetStateFrameByteCountForTesting(), 0);
-                TestEqual(*(Label + TEXT(" managed roots before teardown")), Heap->GetStats().LiveRoots, 0u);
+                TestEqual(*(Label + TEXT(" cancellation sources before teardown")), Owner->GetCancellationSourceCountForTesting(), 0);
+                TestEqual(*(Label + TEXT(" static domain roots")), Heap->GetStats().StaticRoots, static_cast<uint32>(StaticRoots));
+                TestEqual(*(Label + TEXT(" only domain roots before teardown")), Heap->GetStats().LiveRoots, static_cast<uint32>(StaticRoots));
                 TestEqual(*(Label + TEXT(" managed frames")), Heap->GetStats().ActiveFrames, 0u);
                 if (!Collect()) return false;
-                TestEqual(*(Label + TEXT(" exception objects")), Heap->GetStats().LiveObjects, 0u);
-                TestEqual(*(Label + TEXT(" heap native bytes")), Heap->GetStats().NativeDataBytes, uint64(0));
+                const bool CacheTouched = StaticCacheFault && (!CacheDeferred || Resumes > 0);
+                const bool SuccessTouched = StaticSuccessDeferred && Resumes > 0;
+                // Script.Trace has no initializer, so its reserved domain slot
+                // remains null. Cache creates one control object; Broken adds
+                // its control object, wrapper and inner error until unload.
+                const uint32 DomainObjects = CacheTouched ? 3u : SuccessTouched ? 1u : 0u;
+                TestEqual(*(Label + TEXT(" only expected domain controls and cached errors survive")), Heap->GetStats().LiveObjects, DomainObjects);
+                if (DomainObjects == 0)
+                    TestEqual(*(Label + TEXT(" heap native bytes")), Heap->GetStats().NativeDataBytes, uint64(0));
                 Owner->Teardown();
                 Owner->Teardown();
                 Runtime.Unload();
                 Runtime.Unload();
+                TestNull(*(Label + TEXT(" VM retirement releases domain controls and cached errors")), Runtime.GetManagedHeapForTesting());
                 ++Cases;
-                AddInfo(FString::Printf(TEXT("async-void-owner %s fault=%d trace=%d resumes=%d"), *Label, Faulted ? 1 : 0,
-                    Complete ? ExpectedTrace : FrozenTrace, Resumes));
+                AddInfo(FString::Printf(TEXT("async-void-owner %s fault=%d trace=%d resumes=%d domain_roots=%d domain_objects=%u"),
+                    *Label, Faulted ? 1 : 0, Complete ? ExpectedTrace : FrozenTrace, Resumes, StaticRoots, DomainObjects));
             }
         }
     }

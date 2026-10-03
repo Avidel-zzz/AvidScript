@@ -138,6 +138,12 @@ FString VoidOwnerProvenance(const TCHAR* Capabilities = TEXT("error.async_void_o
 		TEXT("\ncapabilities=%s\nsource_language=csharp\nsemantic=55/1.64"), Capabilities);
 }
 
+FString VoidCompositionProvenance(const TCHAR* Capabilities = TEXT("error.async_void_owner@1,managed.static_storage@1"))
+{
+	return Provenance(37) + FString::Printf(TEXT("\nexecution_base=29/1.28\ntask_local_exception_model=cancellation")
+		TEXT("\ncapabilities=%s\nsource_language=csharp\nsemantic=56/1.65\nsource_execution=55/1.64"), Capabilities);
+}
+
 TArray<uint8> VoidOwnerModule(const FString* Metadata, const FString& ProvenanceText = VoidOwnerProvenance())
 {
 	TArray<uint8> Wasm;
@@ -1507,6 +1513,63 @@ bool FAvidScriptAsyncVoidCatalogTest::RunTest(const FString& Parameters)
 			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(VoidOwnerModule(&Metadata, Invalid), ModuleId, Catalog, Error));
 		TestFalse(TEXT("Rejected contract publishes no catalog"), Catalog != nullptr);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAsyncVoidCompositionCatalogTest,
+	"AvidScript.Runtime.LanguageErrorCatalog.AsyncVoidCompositionAdmission",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptAsyncVoidCompositionCatalogTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScriptLanguageErrorCatalogTests;
+	const FString Metadata = Json(Document(37));
+	TUniquePtr<FAvidScriptLanguageErrorCatalog> Catalog;
+	FString Error;
+	for (const TCHAR* Capabilities : {
+		TEXT("error.async_void_owner@1,managed.static_storage@1"),
+		TEXT("error.async_void_owner@1,error.cancellation_token_value@1"),
+		TEXT("async.await_readiness@1,async.cancellation_identity@1,error.async_void_owner@1,error.cancellation_token_value@1,error.exception_values@1,managed.static_storage@1")})
+	{
+		if (!TestTrue(TEXT("IR37 admits exact static, token and full composition contracts"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+				VoidOwnerModule(&Metadata, VoidCompositionProvenance(Capabilities)), ModuleId, Catalog, Error))) return false;
+		const FString Declared(Capabilities);
+		TestTrue(TEXT("Composition retains checked owner and Task cancellation"),
+			Catalog->SupportsAsyncVoidErrorOwner() && Catalog->SupportsTaskCancellationError());
+		TestEqual(TEXT("IR37 identity requires actual declaration"), Catalog->SupportsTaskCancellationIdentity(),
+			Declared.Contains(TEXT("async.cancellation_identity@1")));
+		TestEqual(TEXT("IR37 token requires actual declaration"), Catalog->SupportsExceptionCancellationToken(),
+			Declared.Contains(TEXT("error.cancellation_token_value@1")));
+	}
+	for (const FString& Invalid : {
+		VoidCompositionProvenance(TEXT("error.async_void_owner@1")),
+		VoidCompositionProvenance(TEXT("managed.static_storage@1")),
+		VoidCompositionProvenance(TEXT("error.async_void_owner@1,managed.static_storage@2")),
+		VoidCompositionProvenance(TEXT("error.async_void_owner@1,error.async_void_owner@1,managed.static_storage@1")),
+		VoidCompositionProvenance().Replace(TEXT("guest_ir=37/1.36"), TEXT("guest_ir=37/1.35")),
+		VoidCompositionProvenance().Replace(TEXT("semantic=56/1.65"), TEXT("semantic=55/1.64")),
+		VoidCompositionProvenance().Replace(TEXT("\nsource_execution=55/1.64"), TEXT("")),
+		VoidCompositionProvenance().Replace(TEXT("source_execution=55/1.64"), TEXT("source_execution=50/1.59")),
+		VoidCompositionProvenance().Replace(TEXT("execution_base=29/1.28"), TEXT("execution_base=30/1.29")),
+		VoidCompositionProvenance() + TEXT("\nunknown=1")})
+	{
+		TestFalse(TEXT("IR37 rejects malformed composition identities and capabilities"),
+			FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(VoidOwnerModule(&Metadata, Invalid), ModuleId, Catalog, Error));
+		TestFalse(TEXT("Rejected IR37 publishes no catalog"), Catalog != nullptr);
+	}
+	const FString OldMetadata = Json(Document(36));
+	const FString Downgrade = VoidCompositionProvenance()
+		.Replace(TEXT("guest_ir=37/1.36"), TEXT("guest_ir=36/1.35"))
+		.Replace(TEXT("semantic=56/1.65"), TEXT("semantic=55/1.64"));
+	TestFalse(TEXT("Version-only downgrade retaining composition marker is rejected by IR36"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(VoidOwnerModule(&OldMetadata, Downgrade), ModuleId, Catalog, Error));
+	TestFalse(TEXT("IR36 catalog cannot authorize IR37 execution"),
+		FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(VoidOwnerModule(&OldMetadata, VoidCompositionProvenance()), ModuleId, Catalog, Error));
+	TestFalse(TEXT("IR37 binds loaded module identity"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+		VoidOwnerModule(&Metadata, VoidCompositionProvenance()), TEXT("other_module"), Catalog, Error));
+	TestFalse(TEXT("IR37 requires catalog"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+		VoidOwnerModule(nullptr, VoidCompositionProvenance()), ModuleId, Catalog, Error));
 	return true;
 }
 

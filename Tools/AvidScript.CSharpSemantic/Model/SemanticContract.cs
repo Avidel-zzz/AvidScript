@@ -48,7 +48,8 @@ public static class SemanticContract
 
     public static bool HasAsyncVoidErrorOwner(SemanticDocument document) =>
         document.SchemaVersion == AsyncVoidErrorOwnerSchemaVersion
-        && document.SemanticVersion == AsyncVoidErrorOwnerSemanticVersion;
+        && document.SemanticVersion == AsyncVoidErrorOwnerSemanticVersion
+        || SemanticComposableCapabilities.IsAsyncVoidVersion(document);
 
     public static bool HasCancellationTokens(SemanticDocument document) =>
         document.SchemaVersion == CancellationTokenSchemaVersion
@@ -134,5 +135,7 @@ public static class SemanticContract
         || (schemaVersion == SemanticComposableCapabilities.SchemaVersion
             && semanticVersion == SemanticComposableCapabilities.SemanticVersion)
         || (schemaVersion == AsyncVoidErrorOwnerSchemaVersion
-            && semanticVersion == AsyncVoidErrorOwnerSemanticVersion);
+            && semanticVersion == AsyncVoidErrorOwnerSemanticVersion)
+        || (schemaVersion == SemanticComposableCapabilities.AsyncVoidSchemaVersion
+            && semanticVersion == SemanticComposableCapabilities.AsyncVoidSemanticVersion);
 }

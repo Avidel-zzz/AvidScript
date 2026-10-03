@@ -56,15 +56,14 @@ public static class SemanticAnalyzer
             throw new ArgumentException("Synchronous async exceptions require cancellation analysis.",
                 nameof(enableAsyncSynchronousExceptions));
         if (enableAsyncCatchVariables && (!enableAsyncSynchronousExceptions
-                || enableStaticInitialization && !enableCancellationTokens))
+                || enableStaticInitialization && !enableCancellationTokens && !enableAsyncVoidErrorOwner))
             throw new ArgumentException("Async catch variables require synchronous exception analysis; static composition requires cancellation token values.",
                 nameof(enableAsyncCatchVariables));
-        if (enableCancellationTokens && !enableAsyncCatchVariables)
+        if (enableCancellationTokens && !enableAsyncCatchVariables && !enableAsyncVoidErrorOwner)
             throw new ArgumentException("Cancellation token values require async catch variable analysis.",
                 nameof(enableCancellationTokens));
-        if (enableAsyncVoidErrorOwner && (!enableAsyncSynchronousExceptions
-                || enableStaticInitialization || enableCancellationTokens))
-            throw new ArgumentException("The async void error owner source contract requires synchronous async exception analysis and currently excludes static/token composition.",
+        if (enableAsyncVoidErrorOwner && !enableAsyncSynchronousExceptions)
+            throw new ArgumentException("The async void error owner source contract requires synchronous async exception analysis.",
                 nameof(enableAsyncVoidErrorOwner));
 
         string sourceSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
@@ -361,8 +360,21 @@ public static class SemanticAnalyzer
             RejectedAsyncExceptionFlows = controlFlowProjection.RejectedAsyncExceptionFlows.Count > 0
                 ? controlFlowProjection.RejectedAsyncExceptionFlows : null,
         };
-        if (!enableStaticInitialization) return document;
-        SemanticDocument projected = SemanticStaticInitializerProjector.Project(context, typeRegistry, document);
+        SemanticDocument projected = enableStaticInitialization
+            ? SemanticStaticInitializerProjector.Project(context, typeRegistry, document) : document;
+        if (hasVoidErrorOwners && (projected.StaticInitialization is not null || tokenValues))
+        {
+            var composedManifest = SemanticComposableCapabilities.FromProjectedSource(projected);
+            return projected with {
+                SchemaVersion = SemanticComposableCapabilities.AsyncVoidSchemaVersion,
+                SemanticVersion = SemanticComposableCapabilities.AsyncVoidSemanticVersion,
+                StaticInitialization = projected.StaticInitialization is { } staticPlan ? staticPlan with {
+                    BaseSchemaVersion = composedManifest.BaseSchemaVersion,
+                    BaseSemanticVersion = composedManifest.BaseSemanticVersion } : null,
+                CapabilityManifest = composedManifest,
+            };
+        }
+        if (!enableStaticInitialization) return projected;
         if (!enableCancellationTokens || !tokenValues
             || projected.StaticInitialization is null) return projected;
         SemanticCapabilityManifest manifest = SemanticComposableCapabilities.FromProjectedSource(projected);

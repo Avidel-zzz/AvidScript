@@ -14,8 +14,12 @@ public static class SemanticAsyncVoidErrorOwnerValidator
         if (!SemanticContract.HasAsyncVoidErrorOwner(document))
             return document.SchemaVersion != SemanticContract.AsyncVoidErrorOwnerSchemaVersion
                 && document.SemanticVersion != SemanticContract.AsyncVoidErrorOwnerSemanticVersion
+                && document.SchemaVersion != SemanticComposableCapabilities.AsyncVoidSchemaVersion
+                && document.SemanticVersion != SemanticComposableCapabilities.AsyncVoidSemanticVersion
                 && document.AsyncMethods.All(method => method?.VoidErrorOwner is null);
-        if (document.StaticInitialization is not null || document.CapabilityManifest is not null
+        bool composed = SemanticComposableCapabilities.IsAsyncVoidVersion(document);
+        if ((composed ? !SemanticComposableCapabilityValidator.IsValid(document)
+                : document.StaticInitialization is not null || document.CapabilityManifest is not null)
             || !document.AsyncMethods.Any(method => method?.VoidErrorOwner is not null)) return false;
         foreach (SemanticAsyncMethod? method in document.AsyncMethods)
         {

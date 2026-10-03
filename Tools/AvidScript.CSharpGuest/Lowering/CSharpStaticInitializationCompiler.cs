@@ -13,18 +13,21 @@ public static class CSharpStaticInitializationCompiler
     {
         module = null;
         if (!CSharpStaticSourcePreparation.TryPrepare(source, out var ordinary, out var execution, out error)) return false;
-        bool synchronousTokenComposition = SemanticComposableCapabilities.IsVersion(source)
+        bool voidComposition = SemanticComposableCapabilities.IsAsyncVoidVersion(source);
+        bool synchronousTokenComposition = !voidComposition && SemanticComposableCapabilities.IsVersion(source)
             && source.AsyncMethods.Count == 0;
-        bool asynchronousTokenComposition = SemanticComposableCapabilities.IsVersion(source)
+        bool asynchronousTokenComposition = !voidComposition && SemanticComposableCapabilities.IsVersion(source)
             && source.AsyncMethods.Count != 0;
         if (ordinary!.ExceptionFlows is not null
             || !synchronousTokenComposition && SemanticContract.HasAsyncSynchronousExceptions(ordinary))
         {
             if (!CSharpLanguageErrorCompiler.TryLower(ordinary, semanticSha256, out var compilation,
-                    out error, deferComposedValidation: asynchronousTokenComposition)) return false;
+                    out error, deferComposedValidation: asynchronousTokenComposition || voidComposition)) return false;
             GuestModule restored = compilation!.Module with { Provenance = compilation.Module.Provenance with
             { SemanticSchemaVersion = source.SchemaVersion, SemanticVersion = source.SemanticVersion } };
-            if (asynchronousTokenComposition)
+            if (voidComposition)
+                restored = CSharpAsyncVoidErrorLowerer.Wrap(source, restored);
+            else if (asynchronousTokenComposition)
             {
                 // The legacy wrappers were built around IR 30. IR 35 declares
                 // their shared IR 29 execution base only after the expected

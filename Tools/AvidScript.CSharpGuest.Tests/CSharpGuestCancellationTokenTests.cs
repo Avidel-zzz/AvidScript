@@ -162,7 +162,7 @@ internal static class CSharpGuestCancellationTokenTests
             + "public static async Task<int> Run() { " + body + " }", 29);
     }
 
-    private static string AsyncFacade => CSharpGuestContinuationTests.ReferenceFacade
+    internal static string AsyncFacade => CSharpGuestContinuationTests.ReferenceFacade
         .Replace("internal AvidCancellationToken(long value) { Value = value; }",
             "internal AvidCancellationToken(long value) { Value = value; } [MethodImpl(MethodImplOptions.InternalCall)] public static extern implicit operator System.Threading.CancellationToken(AvidCancellationToken token);", StringComparison.Ordinal)
         .Replace("public AvidDelayAwaitable WithCancellation(AvidCancellationToken token) => default;",

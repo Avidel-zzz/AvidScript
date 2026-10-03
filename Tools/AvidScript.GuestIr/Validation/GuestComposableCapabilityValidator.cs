@@ -68,6 +68,10 @@ internal static class GuestComposableCapabilityValidator
         RequirePlan(GuestComposableCapabilities.ExceptionValues, module.ExceptionValues is not null);
         RequirePlan(GuestComposableCapabilities.CancellationTokenValue, module.CancellationTokens is not null);
         RequirePlan(GuestAsyncVoidErrorOwners.CapabilityId, module.AsyncVoidErrorOwners is not null);
+        if (GuestAsyncVoidErrorOwners.IsCompositionVersion(module)
+            && !declared.Contains(GuestComposableCapabilities.StaticStorage)
+            && !declared.Contains(GuestComposableCapabilities.CancellationTokenValue))
+            Add("IR37 async void composition requires an actual static or token plan.");
 
         int baseSchema = manifest.ExecutionBaseSchemaVersion;
         string baseVersion = manifest.ExecutionBaseIrVersion;
