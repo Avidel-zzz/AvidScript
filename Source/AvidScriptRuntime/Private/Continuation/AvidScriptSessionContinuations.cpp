@@ -184,7 +184,23 @@ int64 FAvidScriptContinuationHostEndpoint::ScheduleObjectLoad(
 			Lane,
 			ActivationSerial,
 			MoveTemp(ObjectPath),
-			CallbackId)
+			CallbackId,
+			false)
+		: 0;
+}
+
+int64 FAvidScriptContinuationHostEndpoint::ScheduleObjectLoadWithCancelResume(
+	FString ObjectPath,
+	const int32 CallbackId)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return bValid && PinnedOwner
+		? PinnedOwner->ScheduleObjectLoad(
+			Lane,
+			ActivationSerial,
+			MoveTemp(ObjectPath),
+			CallbackId,
+			true)
 		: 0;
 }
 
@@ -1262,7 +1278,8 @@ int64 FAvidScriptSessionContinuations::ScheduleObjectLoad(
 	const EAvidScriptContinuationLane Lane,
 	const uint64 ActivationSerial,
 	FString ObjectPath,
-	const int32 CallbackId)
+	const int32 CallbackId,
+	const bool bResumeOnCancel)
 {
 	if (!IsInGameThread()
 		|| bTearingDown
@@ -1304,6 +1321,7 @@ int64 FAvidScriptSessionContinuations::ScheduleObjectLoad(
 	Entry.CallbackId = CallbackId;
 	Entry.World = World;
 	Entry.ProducerKind = EProducerKind::AsyncObjectLoad;
+	Entry.bResumeOnCancel = bResumeOnCancel;
 	const int64 Token = AllocateEntry(MoveTemp(Entry));
 	if (Token == 0)
 	{
@@ -2563,7 +2581,8 @@ bool FAvidScriptSessionContinuations::CancelEntry(
 	const bool bResumeOutcome = bDeliverTerminal
 		&& (Entry.LatentCompletion.ResumesOutcomeOnCancel()
 			|| Entry.ProducerKind == EProducerKind::AsyncAction
-			|| (Entry.ProducerKind == EProducerKind::Timer
+			|| ((Entry.ProducerKind == EProducerKind::Timer
+					|| Entry.ProducerKind == EProducerKind::AsyncObjectLoad)
 				&& Entry.bResumeOnCancel
 				&& IsEntryContextLive(Entry)));
 	CancelEntryProducer(Entry);
@@ -2576,6 +2595,7 @@ bool FAvidScriptSessionContinuations::CancelEntry(
 	}
 
 	ReleaseEntryResult(Entry);
+	Entry.LoadedObject.Reset();
 	UnbindEntryFromCancellationSource(Entry);
 	Entry.CancellationCauseSourceToken = CauseSourceToken;
 	Entry.bReady = true;

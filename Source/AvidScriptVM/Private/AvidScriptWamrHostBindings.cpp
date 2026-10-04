@@ -858,6 +858,22 @@ int64_t ContinuationLoadObject(wasm_exec_env_t ExecEnv, int32_t ObjectPathId, in
 		: 0;
 }
 
+int64_t ContinuationLoadObjectCancelResumeV1(wasm_exec_env_t ExecEnv, int32_t ObjectPathId, int32_t CallbackId)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationLoadObjectCancelResumeV1;
+	Call.IntArgs[0] = ObjectPathId;
+	Call.IntArgs[1] = CallbackId;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::ContinuationLoadObjectCancelResumeV1),
+		Call,
+		Result)
+		? Result.ReturnValueI64
+		: 0;
+}
+
 int64_t ContinuationCancelSourceCreate(wasm_exec_env_t ExecEnv)
 {
 	FAvidScriptHostCall Call;
@@ -1560,6 +1576,7 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::ContinuationDelayCancelResumeV1: return reinterpret_cast<void*>(ContinuationDelayCancelResumeV1);
 	case EAvidScriptHostBindingId::ContinuationCancel: return reinterpret_cast<void*>(ContinuationCancel);
 	case EAvidScriptHostBindingId::ContinuationLoadObject: return reinterpret_cast<void*>(ContinuationLoadObject);
+	case EAvidScriptHostBindingId::ContinuationLoadObjectCancelResumeV1: return reinterpret_cast<void*>(ContinuationLoadObjectCancelResumeV1);
 	case EAvidScriptHostBindingId::ContinuationCancelSourceCreate: return reinterpret_cast<void*>(ContinuationCancelSourceCreate);
 	case EAvidScriptHostBindingId::ContinuationCancelSourceCancel: return reinterpret_cast<void*>(ContinuationCancelSourceCancel);
 	case EAvidScriptHostBindingId::ContinuationCancelSourceRelease: return reinterpret_cast<void*>(ContinuationCancelSourceRelease);

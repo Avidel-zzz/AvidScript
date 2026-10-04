@@ -40,6 +40,7 @@ public:
 	int64 ScheduleDelay(float DelaySeconds, int32 CallbackId) override;
 	int64 ScheduleDelayWithCancelResume(float DelaySeconds, int32 CallbackId) override;
 	int64 ScheduleObjectLoad(FString ObjectPath, int32 CallbackId) override;
+	int64 ScheduleObjectLoadWithCancelResume(FString ObjectPath, int32 CallbackId) override;
 	bool Cancel(int64 Token) override;
 	bool ReadCancellationCause(int64 ContinuationToken, int64& OutSourceToken) const override;
 	int64 CreateCancellationSource() override;
@@ -211,7 +212,8 @@ public:
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
 		FString ObjectPath,
-		int32 CallbackId);
+		int32 CallbackId,
+		bool bResumeOnCancel);
 	EAvidScriptTaskWaitRegistration AwaitTaskResult(
 		EAvidScriptContinuationLane Lane, uint64 ActivationSerial,
 		int64 TaskToken, int32 CallbackId, int64& OutContinuationToken);

@@ -584,6 +584,8 @@ public:
 	int64 HandleContinuationLoadObjectImport(
 		int32 Utf8ValueReference,
 		int32 CallbackId);
+	int64 HandleContinuationLoadObjectCancelResumeV1Import(
+		int32 Utf8ValueReference, int32 CallbackId);
 	int32 HandleContinuationCancelImport(int64 ContinuationToken);
 	int64 HandleContinuationCancelSourceCreateImport();
 	int32 HandleContinuationCancelStatusV1Import(int64 SourceToken);
@@ -722,6 +724,8 @@ public:
 
 private:
 	enum class EInstanceLifecycleOperation : uint8 { Begin, Tick, End };
+	int64 HandleContinuationLoadObjectInternal(
+		int32 Utf8ValueReference, int32 CallbackId, bool bResumeOnCancel);
 	bool AdmitTaskTerminalError(int64 TaskToken, int32 TypeToken, int32 SourceToken,
 		uint64 ObjectToken, bool bCancellation, FAvidScriptHostCallResult& OutResult,
 		TOptional<int64> CancellationSourceToken = {});

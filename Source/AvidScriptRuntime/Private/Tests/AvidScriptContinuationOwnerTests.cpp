@@ -141,6 +141,14 @@ public:
 		return Token == ExpectedToken;
 	}
 
+	int64 ScheduleObjectLoadWithCancelResume(FString ObjectPath, const int32 CallbackId) override
+	{
+		LastObjectPath = MoveTemp(ObjectPath);
+		LastCallbackId = CallbackId;
+		++ObjectLoadCancelResumeScheduleCount;
+		return ExpectedToken;
+	}
+
 	int64 CreateCancellationSource() override
 	{
 		++CreateCancellationSourceCount;
@@ -197,6 +205,7 @@ public:
 	int32 ScheduleCount = 0;
 	int32 CancelResumeScheduleCount = 0;
 	int32 ObjectLoadScheduleCount = 0;
+	int32 ObjectLoadCancelResumeScheduleCount = 0;
 	int32 CancelCount = 0;
 	int32 CreateCancellationSourceCount = 0;
 	int32 CancelCancellationSourceCount = 0;
@@ -242,6 +251,7 @@ public:
 	{
 		FSoftObjectPath ObjectPath;
 		FCompletion Completion;
+		TWeakPtr<IAvidScriptAsyncObjectLoadHandle> Handle;
 		TSharedRef<FAvidScriptFakeAsyncLoadCancelState> CancelState =
 			MakeShared<FAvidScriptFakeAsyncLoadCancelState>();
 	};
@@ -256,6 +266,7 @@ public:
 		Requests.Add(Request);
 		TSharedPtr<IAvidScriptAsyncObjectLoadHandle> Handle =
 			MakeShared<FAvidScriptFakeAsyncLoadHandle>(Request->CancelState);
+		Request->Handle = Handle;
 		if (bCompleteSynchronously)
 		{
 			FCompletion LocalCompletion = MoveTemp(Request->Completion);
@@ -557,6 +568,18 @@ bool FAvidScriptContinuationHostBoundaryTest::RunTest(
 	TestEqual(TEXT("Runtime forwards the decoded object path"), Host.LastObjectPath, ObjectPath);
 	TestEqual(TEXT("Runtime forwards the object callback id"), Host.LastCallbackId, 23);
 	TestEqual(TEXT("Object loading crosses the host boundary once"), Host.ObjectLoadScheduleCount, 1);
+	FAvidScriptHostCall LoadCall;
+	LoadCall.BindingId = EAvidScriptHostBindingId::ContinuationLoadObjectCancelResumeV1;
+	LoadCall.IntArgs[0] = static_cast<int32>(ObjectPathToken);
+	LoadCall.IntArgs[1] = 25;
+	FAvidScriptHostCallResult LoadResult;
+	TestTrue(TEXT("Versioned object import dispatches through Runtime"), Runtime.DispatchHostCall(LoadCall, LoadResult));
+	TestTrue(TEXT("Versioned object dispatch succeeds"), LoadResult.bSucceeded);
+	TestEqual(TEXT("Versioned object dispatch preserves i64"), LoadResult.ReturnValueI64, Host.ExpectedToken);
+	TestEqual(TEXT("Versioned object dispatch forwards path"), Host.LastObjectPath, ObjectPath);
+	TestEqual(TEXT("Versioned object dispatch forwards callback"), Host.LastCallbackId, 25);
+	TestEqual(TEXT("Versioned object dispatch uses its opt-in host method"), Host.ObjectLoadCancelResumeScheduleCount, 1);
+	TestEqual(TEXT("Versioned dispatch does not use legacy scheduling"), Host.ObjectLoadScheduleCount, 1);
 
 	const uint8 EmbeddedNullPath[] = { '/', 'E', 'n', 'g', 'i', 'n', 'e', 0, 'X' };
 	const uint32 EmbeddedNullToken = InternContinuationUtf8(
@@ -583,6 +606,43 @@ bool FAvidScriptContinuationHostBoundaryTest::RunTest(
 		TEXT("Object path failure names the load import"),
 		FailureImport,
 		FString(TEXT("continuation_load_object")));
+	LoadCall.IntArgs[0] = static_cast<int32>(EmbeddedNullToken);
+	TestEqual(TEXT("Versioned import rejects embedded NUL before scheduling"),
+		Runtime.HandleContinuationLoadObjectCancelResumeV1Import(LoadCall.IntArgs[0], 25), 0LL);
+	TestEqual(TEXT("Malformed path does not call opt-in scheduler"), Host.ObjectLoadCancelResumeScheduleCount, 1);
+	TestTrue(TEXT("Versioned malformed path publishes a host failure"),
+		Runtime.ConsumePendingHostImportFailure(FailureModule, FailureImport, FailureDetails));
+	TestEqual(TEXT("Versioned path failure uses avidscript"), FailureModule, FString(TEXT("avidscript")));
+	TestEqual(TEXT("Versioned path failure preserves import identity"), FailureImport,
+		FString(TEXT("avid_continuation_load_object_cancel_resume_v1")));
+	const uint8 InvalidPath[] = { 'i', 'n', 'v', 'a', 'l', 'i', 'd' };
+	LoadCall.IntArgs[0] = static_cast<int32>(InternContinuationUtf8(Runtime, MakeArrayView(InvalidPath)));
+	TestFalse(TEXT("Versioned dispatch rejects invalid asset path"), Runtime.DispatchHostCall(LoadCall, LoadResult));
+	TestEqual(TEXT("Asset path failure has stable reason"), LoadResult.Details, FString(TEXT("continuation_object_path_invalid")));
+	TestEqual(TEXT("Invalid asset path does not reach host"), Host.ObjectLoadCancelResumeScheduleCount, 1);
+	Context.Continuations = nullptr;
+	Runtime.SetHostContext(Context);
+	TestEqual(TEXT("Absent object-load host fails closed"),
+		Runtime.HandleContinuationLoadObjectCancelResumeV1Import(static_cast<int32>(ObjectPathToken), 26), 0LL);
+	class FLegacyObjectHost final : public IAvidScriptContinuationHost
+	{
+	public:
+		int64 ScheduleDelay(float, int32) override { return 0; }
+		int64 ScheduleObjectLoad(FString, int32) override { return 7; }
+		bool Cancel(int64) override { return false; }
+		int64 CreateCancellationSource() override { return 0; }
+		bool CancelCancellationSource(int64) override { return false; }
+		bool ReleaseCancellationSource(int64) override { return false; }
+		bool BindCancellationSource(int64, int64) override { return false; }
+	} LegacyHost;
+	Context.Continuations = &LegacyHost;
+	Runtime.SetHostContext(Context);
+	TestEqual(TEXT("Legacy-only host still supports its existing object method"),
+		Runtime.HandleContinuationLoadObjectImport(static_cast<int32>(ObjectPathToken), 26), 7LL);
+	TestEqual(TEXT("Legacy-only host does not silently drop cancel cleanup"),
+		Runtime.HandleContinuationLoadObjectCancelResumeV1Import(static_cast<int32>(ObjectPathToken), 26), 0LL);
+	Context.Continuations = nullptr;
+	Runtime.SetHostContext(Context);
 	return true;
 }
 
@@ -1379,6 +1439,180 @@ bool FAvidScriptContinuationActivationLivenessTest::RunTest(
 
 	Owner->Teardown();
 	Ownership.Cleanup(Registry);
+	DestroyContinuationWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptAsyncObjectCancelResumeTest,
+	"AvidScript.Runtime.Continuation.AsyncObjectCancelResume",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptAsyncObjectCancelResumeTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!TestTrue(TEXT("Object cancel-resume world is created"), CreateContinuationWorld(World))) return false;
+	const auto Loader = MakeShared<FAvidScriptFakeAsyncObjectLoader>();
+	const auto Owner = MakeShared<FAvidScriptSessionContinuations>(Loader);
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptSessionObjectOwnership Ownership;
+	auto& Host = Owner->ResetActive(World, &Registry, &Ownership);
+	const FString Path(TEXT("/Engine/EngineMeshes/Cube.Cube"));
+	const uint8 State[] = {3, 7, 11};
+	TArray<FAvidScriptContinuationCompletion> Ready;
+
+	// Pending, pre-cancelled bind, direct cancel, ready success/failure, synchronous success.
+	for (int32 Mode = 0; Mode != 6; ++Mode)
+	{
+		UObject* Object = NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+		const int64 Source = Host.CreateCancellationSource();
+		Loader->bCompleteSynchronously = Mode == 5;
+		Loader->SynchronousObject = Object;
+		const int64 Token = Host.ScheduleObjectLoadWithCancelResume(Path, 301 + Mode);
+		const int32 Request = Loader->Requests.Num() - 1;
+		TestNotEqual(TEXT("Opt-in load returns an opaque token"), Token, 0LL);
+		TestTrue(TEXT("Object await stores its cleanup state"), Host.StoreState(Token, MakeArrayView(State)));
+		if (Mode == 1) TestTrue(TEXT("Source cancels before binding"), Host.CancelCancellationSource(Source));
+		TestTrue(TEXT("Object load binds to source"), Host.BindCancellationSource(Source, Token));
+		if (Mode == 3 || Mode == 4) Loader->Complete(Request, Mode == 3 ? Object : nullptr);
+		int64 Cause = 123;
+		TestFalse(TEXT("Cancellation cause cannot be observed before dispatch"), Host.ReadCancellationCause(Token, Cause));
+		TestEqual(TEXT("Rejected cause clears output"), Cause, 0LL);
+		if (Mode == 2) TestTrue(TEXT("Direct cancellation wins"), Host.Cancel(Token));
+		else if (Mode != 1) TestTrue(TEXT("Bound source cancellation wins"), Host.CancelCancellationSource(Source));
+		TestFalse(TEXT("Duplicate cancellation cannot replace completion"), Host.Cancel(Token));
+		if (Mode == 3 || Mode == 5)
+		{
+			const TWeakObjectPtr<UObject> WeakObject(Object);
+			Object = nullptr;
+			Loader->SynchronousObject = nullptr;
+			CollectGarbage(RF_NoFlags);
+			TestFalse(TEXT("Replacing a ready result releases its object before cancel dispatch"), WeakObject.IsValid());
+		}
+		TestEqual(FString::Printf(TEXT("Producer cancellation count matches pending/ready state (mode=%d)"), Mode),
+			Loader->Requests[Request]->CancelState->CancelCount, Mode >= 3 ? 0 : 1);
+		TestFalse(TEXT("Cancellation releases both pending and completed producer handles"), Loader->Requests[Request]->Handle.IsValid());
+		TestEqual(TEXT("Cancellation detaches reverse source binding"), Owner->GetCancellationBindingCountForTesting(), 0);
+		TestTrue(TEXT("Original source releases before dispatch"), Host.ReleaseCancellationSource(Source));
+		const int64 Replacement = Host.CreateCancellationSource();
+		TestNotEqual(TEXT("Source generation is not reused as identity"), Replacement, Source);
+		Loader->Complete(Request, Object);
+		Loader->Complete(Request, Object);
+		Owner->DrainReady(Ready);
+		if (TestEqual(TEXT("Cancelled object load drains once"), Ready.Num(), 1))
+		{
+			TestEqual(TEXT("Cancel preserves continuation identity"), Ready[0].Token, Token);
+			TestEqual(TEXT("Cancel preserves callback"), Ready[0].CallbackId, 301 + Mode);
+			TestEqual(TEXT("Ready completion is replaced with cancellation"), Ready[0].Status, EAvidScriptContinuationStatus::Cancelled);
+			TestEqual(TEXT("Cancelled load publishes no object slot"), Ready[0].ObjectSlot, 0);
+			TestEqual(TEXT("Cancelled load publishes no object generation"), Ready[0].ObjectGeneration, 0);
+			for (int32 Repeat = 0; Repeat != 2; ++Repeat)
+			{
+				TestTrue(TEXT("Dispatch exposes the winning cancellation cause"), Host.ReadCancellationCause(Token, Cause));
+				TestEqual(TEXT("Cause survives source release and slot reuse"), Cause, Mode == 2 ? 0LL : Source);
+			}
+			uint8 Readback[3] = {};
+			TestTrue(TEXT("Cancel callback can read original saved state"), Host.ReadState(Token, MakeArrayView(Readback)));
+			TestTrue(TEXT("Saved state bytes are intact"), FMemory::Memcmp(Readback, State, 3) == 0);
+			TestFalse(TEXT("Dispatching cancelled load cannot be cancelled again"), Host.Cancel(Token));
+			TestTrue(TEXT("Cancel callback finalizes its state"), Owner->FinalizeDispatched(Token, Mode != 4));
+		}
+		TestEqual(TEXT("Source reuse is unaffected"), Host.GetCancellationSourceStatus(Replacement), EAvidScriptCancellationSourceStatus::Open);
+		TestTrue(TEXT("Replacement source releases"), Host.ReleaseCancellationSource(Replacement));
+		TestFalse(TEXT("Retired token has no cancellation observation"), Host.ReadCancellationCause(Token, Cause));
+		TestEqual(TEXT("Cancel has no borrowed loaded object"), Ownership.GetBorrowedHandleCount(), 0);
+		TestEqual(TEXT("Cancel has no retained loaded object"), Owner->GetRetainedLoadedObjectCountForTesting(), 0);
+		TestEqual(TEXT("Cancel releases continuation"), Owner->GetActiveCount(), 0);
+		TestEqual(TEXT("Cancel releases saved state"), Owner->GetStateFrameByteCountForTesting(), 0);
+	}
+	Loader->bCompleteSynchronously = false;
+	for (bool Success : {false, true})
+	{
+		UObject* Object = Success ? NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage()) : nullptr;
+		const int64 Token = Host.ScheduleObjectLoadWithCancelResume(Path, 320);
+		Loader->Complete(Loader->Requests.Num() - 1, Object);
+		Owner->DrainReady(Ready);
+		if (TestEqual(TEXT("Noncancelled opt-in load drains once"), Ready.Num(), 1))
+		{
+			TestEqual(TEXT("Existing producer status is preserved"), Ready[0].Status,
+				Success ? EAvidScriptContinuationStatus::Completed : EAvidScriptContinuationStatus::Failed);
+			TestEqual(TEXT("Only success publishes object handle"), Ready[0].ObjectSlot > 0 && Ready[0].ObjectGeneration > 0, Success);
+			TestTrue(TEXT("Noncancelled callback finalizes"), Owner->FinalizeDispatched(Token, true));
+		}
+	}
+	TestEqual(TEXT("Success retains its loaded object"), Owner->GetRetainedLoadedObjectCountForTesting(), 1);
+	TestEqual(TEXT("Success has one borrowed handle"), Ownership.GetBorrowedHandleCount(), 1);
+	Owner->Teardown();
+	TestEqual(TEXT("Teardown releases retained object"), Owner->GetRetainedLoadedObjectCountForTesting(), 0);
+	Ownership.Cleanup(Registry);
+	DestroyContinuationWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptAsyncObjectCancelResumeLifetimeTest,
+	"AvidScript.Runtime.Continuation.AsyncObjectCancelResumeLifetime",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptAsyncObjectCancelResumeLifetimeTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!TestTrue(TEXT("Object cancellation lifetime world is created"), CreateContinuationWorld(World))) return false;
+	const FString Path(TEXT("/Engine/EngineMeshes/Cube.Cube"));
+	for (int32 Mode = 0; Mode != 5; ++Mode)
+	{
+		const auto Loader = MakeShared<FAvidScriptFakeAsyncObjectLoader>();
+		const auto Owner = MakeShared<FAvidScriptSessionContinuations>(Loader);
+		FAvidScriptObjectRegistry Registry;
+		FAvidScriptSessionObjectOwnership Ownership;
+		UObject* Object = NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+		FAvidScriptObjectHandleResult HandleResult;
+		const auto OwnerHandle = Registry.RegisterObject(Object, HandleResult, false);
+		auto& Active = Owner->ResetActive(World, &Registry, &Ownership, OwnerHandle);
+		IAvidScriptContinuationHost& Host = Mode == 1
+			? Owner->BeginPrepared(World, &Registry, &Ownership, OwnerHandle) : Active;
+		TestEqual(TEXT("Invalid callback is rejected"), Host.ScheduleObjectLoadWithCancelResume(Path, 0), 0LL);
+		TestEqual(TEXT("Invalid path is rejected"), Host.ScheduleObjectLoadWithCancelResume(TEXT("invalid"), 1), 0LL);
+		TestEqual(TEXT("Wrong thread cannot schedule object load"),
+			Async(EAsyncExecution::ThreadPool, [&Host, &Path] { return Host.ScheduleObjectLoadWithCancelResume(Path, 1); }).Get(), 0LL);
+		TestEqual(TEXT("Rejected requests do not call loader"), Loader->Requests.Num(), 0);
+		const int64 Source = Host.CreateCancellationSource();
+		const int64 Token = Host.ScheduleObjectLoadWithCancelResume(Path, 340 + Mode);
+		TestNotEqual(TEXT("Lifetime fixture schedules object load"), Token, 0LL);
+		TestTrue(TEXT("Lifetime fixture binds source"), Host.BindCancellationSource(Source, Token));
+		const uint8 State[] = {1, 2, 3};
+		TestTrue(TEXT("Lifetime fixture stores state"), Host.StoreState(Token, MakeArrayView(State)));
+		// Also cover discarding an already-queued cancellation and replacing a ready success.
+		if (Mode == 1) TestTrue(TEXT("Prepared cancellation queues before discard"), Host.CancelCancellationSource(Source));
+		if (Mode == 2) Loader->Complete(0, Object);
+		if (Mode == 0) Owner->Teardown();
+		if (Mode == 1) Owner->DiscardPrepared();
+		if (Mode == 2) TestTrue(TEXT("Owner handle generation is invalidated"), Registry.ReleaseHandle(OwnerHandle, HandleResult, false));
+		if (Mode == 3) World->bIsTearingDown = true;
+		if (Mode == 4) Owner->ResetActive(World, &Registry, &Ownership, OwnerHandle);
+		TArray<FAvidScriptContinuationCompletion> Ready;
+		Owner->DrainReady(Ready);
+		TestEqual(TEXT("Retired execution domain never dispatches Guest"), Ready.Num(), 0);
+		TestEqual(FString::Printf(TEXT("Retirement cancels only unfinished producer (mode=%d)"), Mode),
+			Loader->Requests[0]->CancelState->CancelCount, Mode == 2 ? 0 : 1);
+		TestFalse(TEXT("Retirement releases the producer handle"), Loader->Requests[0]->Handle.IsValid());
+		// DiscardPrepared destroys its endpoint; only the active endpoint remains callable.
+		if (Mode == 1) TestFalse(TEXT("Discarded prepared token cannot enter active lane"), Active.Cancel(Token));
+		else TestEqual(TEXT("Retired endpoint rejects new opt-in work"), Host.ScheduleObjectLoadWithCancelResume(Path, 350), 0LL);
+		World->bIsTearingDown = false;
+		Loader->Complete(0, Object);
+		Owner->DrainReady(Ready);
+		TestEqual(TEXT("Late callback cannot revive retired work"), Ready.Num(), 0);
+		Owner->Teardown();
+		Owner->Teardown();
+		TestEqual(TEXT("Retirement releases all continuations"), Owner->GetActiveCount(), 0);
+		TestEqual(TEXT("Retirement releases all sources"), Owner->GetCancellationSourceCountForTesting(), 0);
+		TestEqual(TEXT("Retirement releases reverse bindings"), Owner->GetCancellationBindingCountForTesting(), 0);
+		TestEqual(TEXT("Retirement releases saved state"), Owner->GetStateFrameByteCountForTesting(), 0);
+		TestEqual(TEXT("Retirement retains no loaded object"), Owner->GetRetainedLoadedObjectCountForTesting(), 0);
+		TestEqual(TEXT("Retirement borrows no loaded object"), Ownership.GetBorrowedHandleCount(), 0);
+		Ownership.Cleanup(Registry);
+	}
 	DestroyContinuationWorld(World);
 	return true;
 }

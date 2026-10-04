@@ -1,4 +1,5 @@
 #include "AvidScriptWasmRuntime.h"
+#include "AvidScriptContinuationCancellationAbi.h"
 #include "AvidScriptEventStateAbi.h"
 #include "AvidScriptLanguageErrorCatalog.h"
 #include "AvidScriptWasmRuntimePrivate.h"
@@ -4894,6 +4895,23 @@ int64 FAvidScriptWasmRuntimeInstance::HandleContinuationLoadObjectImport(
 	const int32 Utf8ValueReference,
 	const int32 CallbackId)
 {
+	return HandleContinuationLoadObjectInternal(Utf8ValueReference, CallbackId, false);
+}
+
+int64 FAvidScriptWasmRuntimeInstance::HandleContinuationLoadObjectCancelResumeV1Import(
+	const int32 Utf8ValueReference, const int32 CallbackId)
+{
+	return HandleContinuationLoadObjectInternal(Utf8ValueReference, CallbackId, true);
+}
+
+int64 FAvidScriptWasmRuntimeInstance::HandleContinuationLoadObjectInternal(
+	const int32 Utf8ValueReference, const int32 CallbackId, const bool bResumeOnCancel)
+{
+	const FString ImportModule = bResumeOnCancel
+		? UTF8_TO_TCHAR(AvidScript::ContinuationCancellation::Abi::Module) : TEXT("env");
+	const FString ImportName = bResumeOnCancel
+		? UTF8_TO_TCHAR(AvidScript::ContinuationCancellation::Abi::ObjectLoadCancelResumeImport)
+		: TEXT("continuation_load_object");
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
 	GetInstanceState().LastHostImportInput = CallbackId;
 	GetInstanceState().LastHostImportResult = 0;
@@ -4912,8 +4930,8 @@ int64 FAvidScriptWasmRuntimeInstance::HandleContinuationLoadObjectImport(
 			DecodeError))
 	{
 		SetPendingHostImportFailure(
-			TEXT("env"),
-			TEXT("continuation_load_object"),
+			ImportModule,
+			ImportName,
 			DecodeError.IsEmpty()
 				? TEXT("continuation_object_path_decode_failed")
 				: MoveTemp(DecodeError));
@@ -4928,17 +4946,19 @@ int64 FAvidScriptWasmRuntimeInstance::HandleContinuationLoadObjectImport(
 		|| !FPackageName::IsValidLongPackageName(LongPackageName))
 	{
 		SetPendingHostImportFailure(
-			TEXT("env"),
-			TEXT("continuation_load_object"),
+			ImportModule,
+			ImportName,
 			TEXT("continuation_object_path_invalid"));
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
 	}
 
 	const int64 Token = HostContext.Continuations != nullptr
-		? HostContext.Continuations->ScheduleObjectLoad(
-			SoftObjectPath.ToString(),
-			CallbackId)
+		? (bResumeOnCancel
+			? HostContext.Continuations->ScheduleObjectLoadWithCancelResume(
+				SoftObjectPath.ToString(), CallbackId)
+			: HostContext.Continuations->ScheduleObjectLoad(
+				SoftObjectPath.ToString(), CallbackId))
 		: 0;
 	GetInstanceState().LastHostImportResult = Token != 0 ? 1 : 0;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
@@ -8625,6 +8645,12 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 		const int64 Value = HandleContinuationLoadObjectImport(
 			Call.IntArgs[0],
 			Call.IntArgs[1]);
+		return FinishI64(Value, !bHasPendingHostImportFailure);
+	}
+	case EAvidScriptHostBindingId::ContinuationLoadObjectCancelResumeV1:
+	{
+		const int64 Value = HandleContinuationLoadObjectCancelResumeV1Import(
+			Call.IntArgs[0], Call.IntArgs[1]);
 		return FinishI64(Value, !bHasPendingHostImportFailure);
 	}
 	case EAvidScriptHostBindingId::ContinuationCancelSourceCreate:

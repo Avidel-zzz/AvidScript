@@ -1,4 +1,5 @@
 #include "AvidScriptEditorBindingSchemaGenerator.h"
+#include "AvidScriptContinuationCancellationAbi.h"
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
@@ -261,6 +262,10 @@ bool FAvidScriptEditorBindingSchemaGenerator::Generate(
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_delay"), TEXT("(fi)I"), TEXT("runtime_service"));
 	WriteIntrinsic(Writer, TEXT("avidscript"), TEXT("avid_continuation_delay_cancel_resume_v1"), TEXT("(fi)I"), TEXT("runtime_service"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_load_object"), TEXT("(ii)I"), TEXT("runtime_service"));
+	WriteIntrinsic(Writer,
+		UTF8_TO_TCHAR(AvidScript::ContinuationCancellation::Abi::Module),
+		UTF8_TO_TCHAR(AvidScript::ContinuationCancellation::Abi::ObjectLoadCancelResumeImport),
+		TEXT("(ii)I"), TEXT("runtime_service"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_result_read"), TEXT("(iiiii)i"), TEXT("runtime_service"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_state_store"), TEXT("(Iii)i"), TEXT("runtime_service"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_state_read"), TEXT("(Iii)i"), TEXT("runtime_service"));
@@ -277,7 +282,7 @@ bool FAvidScriptEditorBindingSchemaGenerator::Generate(
 
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = ResolvedBindings.Num();
-	OutResult.IntrinsicCount = 16;
+	OutResult.IntrinsicCount = 17;
 	return true;
 }
 
@@ -364,6 +369,8 @@ bool FAvidScriptEditorBindingSchemaGenerator::ValidateManifestImports(
 	SupportedImports.Add(TEXT("env.continuation_delay"));
 	SupportedImports.Add(TEXT("avidscript.avid_continuation_delay_cancel_resume_v1"));
 	SupportedImports.Add(TEXT("env.continuation_load_object"));
+	SupportedImports.Add(FString(UTF8_TO_TCHAR(AvidScript::ContinuationCancellation::Abi::Module))
+		+ TEXT(".") + UTF8_TO_TCHAR(AvidScript::ContinuationCancellation::Abi::ObjectLoadCancelResumeImport));
 	SupportedImports.Add(TEXT("env.continuation_result_read"));
 	SupportedImports.Add(TEXT("env.continuation_state_store"));
 	SupportedImports.Add(TEXT("env.continuation_state_read"));

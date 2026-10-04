@@ -836,6 +836,17 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 	const FAvidScriptVmStaticHostImport& LoadObject =
 		GetAvidScriptVmStaticHostImport(
 			EAvidScriptHostBindingId::ContinuationLoadObject);
+	const auto& CancelResumeObject = GetAvidScriptVmStaticHostImport(
+		EAvidScriptHostBindingId::ContinuationLoadObjectCancelResumeV1);
+	TestEqual(TEXT("Cancel-resume object load has a versioned name"),
+		FString(UTF8_TO_TCHAR(CancelResumeObject.ImportName)),
+		FString(TEXT("avid_continuation_load_object_cancel_resume_v1")));
+	TestEqual(TEXT("Cancel-resume object load preserves the object scheduling ABI"),
+		FString(UTF8_TO_TCHAR(CancelResumeObject.Signature)), FString(TEXT("(ii)I")));
+	TestFalse(TEXT("Cancel-resume object load has no env compatibility alias"), CancelResumeObject.bSupportsEnvCompatibility);
+	TestEqual(TEXT("Object cancel-resume id is append-only"),
+		static_cast<uint16>(CancelResumeObject.BindingId),
+		static_cast<uint16>(EAvidScriptHostBindingId::ExceptionCancellationTokenV1) + 1);
 	const FAvidScriptVmStaticHostImport& CreateSource =
 		GetAvidScriptVmStaticHostImport(
 			EAvidScriptHostBindingId::ContinuationCancelSourceCreate);
@@ -1348,8 +1359,10 @@ public:
 			OutResult.ReturnValue = 1;
 			return true;
 		case EAvidScriptHostBindingId::ContinuationLoadObject:
+		case EAvidScriptHostBindingId::ContinuationLoadObjectCancelResumeV1:
 			ObjectPathId = Call.IntArgs[0];
 			LoadCallbackId = Call.IntArgs[1];
+			LastLoadBindingId = Call.BindingId;
 			OutResult.ReturnValueI64 = LoadToken;
 			return true;
 		default:
@@ -1366,6 +1379,7 @@ public:
 	int64 CancelledToken = 0;
 	int32 ObjectPathId = 0;
 	int32 LoadCallbackId = 0;
+	EAvidScriptHostBindingId LastLoadBindingId = EAvidScriptHostBindingId::Invalid;
 };
 }
 
@@ -1511,46 +1525,49 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FAvidScriptVmContinuationLoadObjectStaticInvocationTest::RunTest(
 	const FString& Parameters)
 {
-	const FAvidScriptVmStaticHostImport& Import =
-		GetAvidScriptVmStaticHostImport(
-			EAvidScriptHostBindingId::ContinuationLoadObject);
-	FAvidScriptVmAbiSignature Signature;
-	FString FailureDetails;
-	if (!TestTrue(
-			TEXT("Continuation object load catalog signature parses"),
-			ParseAvidScriptVmAbiSignature(
-				UTF8_TO_TCHAR(Import.Signature),
-				Signature,
-				FailureDetails)))
+	for (const auto Binding : { EAvidScriptHostBindingId::ContinuationLoadObject,
+		EAvidScriptHostBindingId::ContinuationLoadObjectCancelResumeV1 })
 	{
-		return false;
-	}
+		const FAvidScriptVmStaticHostImport& Import = GetAvidScriptVmStaticHostImport(Binding);
+		FAvidScriptVmAbiSignature Signature;
+		FString FailureDetails;
+		if (!TestTrue(
+				TEXT("Continuation object load catalog signature parses"),
+				ParseAvidScriptVmAbiSignature(
+					UTF8_TO_TCHAR(Import.Signature),
+					Signature,
+					FailureDetails)))
+		{
+			return false;
+		}
 
-	FAvidScriptVmStaticValue Arguments[2];
-	Arguments[0].Kind = EAvidScriptVmValueKind::I32;
-	Arguments[0].I32 = 73;
-	Arguments[1].Kind = EAvidScriptVmValueKind::I32;
-	Arguments[1].I32 = 41;
-	FAvidScriptVmContinuationHostDispatcher Dispatcher;
-	FAvidScriptNonBorrowingGuestMemory GuestMemory;
-	FAvidScriptVmStaticCallResult Result;
-	TestTrue(
-		TEXT("Static catalog invokes continuation object load"),
-		InvokeAvidScriptVmStaticHostImport(
-			Import,
-			Signature,
-			MakeArrayView(Arguments),
-			&Dispatcher,
-			GuestMemory,
-			Result,
-			FailureDetails));
-	TestEqual(TEXT("Static adapter forwards IntArgs[0]"), Dispatcher.ObjectPathId, 73);
-	TestEqual(TEXT("Static adapter forwards IntArgs[1]"), Dispatcher.LoadCallbackId, 41);
-	TestEqual(TEXT("Static invocation preserves the i64 result kind"), Result.Kind, EAvidScriptVmValueKind::I64);
-	TestEqual(
-		TEXT("Static invocation returns ReturnValueI64"),
-		Result.I64,
-		FAvidScriptVmContinuationHostDispatcher::LoadToken);
+		FAvidScriptVmStaticValue Arguments[2];
+		Arguments[0].Kind = EAvidScriptVmValueKind::I32;
+		Arguments[0].I32 = 73;
+		Arguments[1].Kind = EAvidScriptVmValueKind::I32;
+		Arguments[1].I32 = 41;
+		FAvidScriptVmContinuationHostDispatcher Dispatcher;
+		FAvidScriptNonBorrowingGuestMemory GuestMemory;
+		FAvidScriptVmStaticCallResult Result;
+		TestTrue(
+			TEXT("Static catalog invokes continuation object load"),
+			InvokeAvidScriptVmStaticHostImport(
+				Import,
+				Signature,
+				MakeArrayView(Arguments),
+				&Dispatcher,
+				GuestMemory,
+				Result,
+				FailureDetails));
+		TestEqual(TEXT("Static adapter forwards IntArgs[0]"), Dispatcher.ObjectPathId, 73);
+		TestEqual(TEXT("Static adapter forwards IntArgs[1]"), Dispatcher.LoadCallbackId, 41);
+		TestEqual(TEXT("Static adapter preserves opt-in scheduling identity"), Dispatcher.LastLoadBindingId, Binding);
+		TestEqual(TEXT("Static invocation preserves the i64 result kind"), Result.Kind, EAvidScriptVmValueKind::I64);
+		TestEqual(
+			TEXT("Static invocation returns ReturnValueI64"),
+			Result.I64,
+			FAvidScriptVmContinuationHostDispatcher::LoadToken);
+	}
 	return true;
 }
 

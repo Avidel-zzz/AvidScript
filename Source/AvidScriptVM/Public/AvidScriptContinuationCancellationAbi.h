@@ -14,4 +14,6 @@ namespace AvidScript::ContinuationCancellation::Abi
 {
 inline constexpr const char* Module = "avidscript";
 inline constexpr const char* StatusImport = "avid_continuation_cancel_status_v1";
+// Compiler-owned object await keeps its state until the cancellation callback.
+inline constexpr const char* ObjectLoadCancelResumeImport = "avid_continuation_load_object_cancel_resume_v1";
 }

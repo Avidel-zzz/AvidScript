@@ -49,6 +49,7 @@ public:
 	// cleanup. Older hosts fail closed instead of silently dropping cleanup.
 	virtual int64 ScheduleDelayWithCancelResume(float, int32) { return 0; }
 	virtual int64 ScheduleObjectLoad(FString ObjectPath, int32 CallbackId) = 0;
+	virtual int64 ScheduleObjectLoadWithCancelResume(FString, int32) { return 0; }
 	virtual bool Cancel(int64 Token) = 0;
 	// Native-only observation during dispatch of a directly cancelled await.
 	// Success with zero means cancellation without a source. The returned

@@ -21,7 +21,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Default reflection schema generates"), FAvidScriptEditorBindingSchemaGenerator::GenerateDefault(FirstJson, FirstResult));
 	TestTrue(TEXT("Generation result succeeds"), FirstResult.bSucceeded);
 	TestEqual(TEXT("Default schema contains ten reflected bindings"), FirstResult.BindingCount, 10);
-	TestEqual(TEXT("Default schema contains sixteen host intrinsics"), FirstResult.IntrinsicCount, 16);
+	TestEqual(TEXT("Default schema contains seventeen host intrinsics"), FirstResult.IntrinsicCount, 17);
 
 	FString SecondJson;
 	FAvidScriptBindingSchemaGenerateResult SecondResult;
@@ -39,7 +39,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestEqual(TEXT("Schema version is one"), Root->GetIntegerField(TEXT("schema_version")), 1);
 	TestEqual(TEXT("Schema source is UE reflection"), Root->GetStringField(TEXT("source")), FString(TEXT("ue_reflection")));
 	const TArray<TSharedPtr<FJsonValue>>& Intrinsics = Root->GetArrayField(TEXT("intrinsics"));
-	TestEqual(TEXT("Schema serializes sixteen intrinsic objects"), Intrinsics.Num(), 16);
+	TestEqual(TEXT("Schema serializes seventeen intrinsic objects"), Intrinsics.Num(), 17);
 	const auto CountIntrinsic = [&Intrinsics](
 		const FString& Module,
 		const FString& Name,
@@ -102,6 +102,10 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 		TEXT("Schema contains async object-load intrinsic"),
 		CountIntrinsic(TEXT("env"), TEXT("continuation_load_object"), TEXT("(ii)I")),
 		1);
+	TestEqual(TEXT("Schema contains exactly one versioned cancel-resume object intrinsic"),
+		CountIntrinsic(TEXT("avidscript"), TEXT("avid_continuation_load_object_cancel_resume_v1"), TEXT("(ii)I")), 1);
+	TestEqual(TEXT("Versioned object intrinsic has no env alias"),
+		CountIntrinsic(TEXT("env"), TEXT("avid_continuation_load_object_cancel_resume_v1"), TEXT("(ii)I")), 0);
 	TestEqual(
 		TEXT("Schema contains bulk continuation result intrinsic"),
 		CountIntrinsic(TEXT("env"), TEXT("continuation_result_read"), TEXT("(iiiii)i")),
@@ -263,6 +267,18 @@ bool FAvidScriptEditorBindingSchemaManifestContractSmokeTest::RunTest(const FStr
 	TestEqual(TEXT("Wrong namespace reports contract mismatch"),
 		WrongNamespaceResult.ErrorCategory,
 		FString(TEXT("binding_contract_mismatch")));
+	for (int32 Variant = 0; Variant != 3; ++Variant)
+	{
+		const FString ObjectManifest = FString::Printf(
+			TEXT(R"json({"required_imports":[{"module":"%s","name":"%s"}]})json"),
+			Variant == 1 ? TEXT("env") : TEXT("avidscript"),
+			Variant == 2 ? TEXT("avid_continuation_load_object_cancel_resume_v2")
+				: TEXT("avid_continuation_load_object_cancel_resume_v1"));
+		TestTrue(TEXT("Object import manifest writes"), FFileHelper::SaveStringToFile(ObjectManifest, *InvalidManifestPath));
+		FAvidScriptBindingSchemaGenerateResult ObjectResult;
+		TestEqual(TEXT("Only exact v1 object import in avidscript is supported"),
+			FAvidScriptEditorBindingSchemaGenerator::ValidateManifestImports(InvalidManifestPath, ObjectResult), Variant == 0);
+	}
 
 	const FString MalformedManifest = TEXT(R"json({"required_imports":[7]})json");
 	TestTrue(TEXT("Malformed manifest fixture writes"), FFileHelper::SaveStringToFile(MalformedManifest, *InvalidManifestPath));

@@ -28,7 +28,7 @@ constexpr const TCHAR* PackagedOracleModuleEnvironment =
 constexpr const TCHAR* PackagedOracleReportEnvironment =
 	TEXT("AVIDSCRIPT_PACKAGED_ORACLE_REPORT");
 
-bool IsPathUnderRoot(const FString& Path, const FString& Root)
+bool IsPackagedOraclePathUnderRoot(const FString& Path, const FString& Root)
 {
 	FString FullPath = FPaths::ConvertRelativePathToFull(Path);
 	FString FullRoot = FPaths::ConvertRelativePathToFull(Root);
@@ -148,7 +148,7 @@ bool UAvidScriptWorldSubsystem::StartPackagedOracle(UWorld& InWorld)
 	}
 	PackagedOracleReportPath = FPaths::ConvertRelativePathToFull(PackagedOracleReportPath);
 	FPaths::NormalizeFilename(PackagedOracleReportPath);
-	if (!IsPathUnderRoot(PackagedOracleReportPath, FPaths::ProjectSavedDir()))
+	if (!IsPackagedOraclePathUnderRoot(PackagedOracleReportPath, FPaths::ProjectSavedDir()))
 	{
 		PackagedOracleReportPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
 			FPaths::ProjectSavedDir(),
