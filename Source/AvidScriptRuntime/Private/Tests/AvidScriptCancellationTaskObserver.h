@@ -17,6 +17,12 @@ public:
 		if (Token != 0) CreatedTasks.Add(Token, MoveTemp(TypeId));
 		return Token;
 	}
+	int64 CreateRootedTaskResult(FString TypeId) override
+	{
+		const int64 Token = Host.CreateRootedTaskResult(TypeId);
+		if (Token != 0) CreatedTasks.Add(Token, MoveTemp(TypeId));
+		return Token;
+	}
 	bool RetainTaskResult(int64 Token) override { return Host.RetainTaskResult(Token); }
 	bool ReleaseTaskResult(int64 Token) override
 	{
@@ -45,6 +51,9 @@ public:
 	{ return Host.RetainTaskForContinuation(TaskToken, ContinuationToken); }
 	bool SucceedTaskResult(int64 Token, TConstArrayView<uint8> Value, TArray<int64>& OutWaiters) override
 	{ return Host.SucceedTaskResult(Token, Value, OutWaiters); }
+	bool SucceedRootedTaskResult(int64 Token, TConstArrayView<uint8> Value,
+		TSharedPtr<IAvidScriptTaskValueLease> Lease, TArray<int64>& OutWaiters) override
+	{ return Host.SucceedRootedTaskResult(Token, Value, MoveTemp(Lease), OutWaiters); }
 	bool FaultTaskResult(int64 Token, FString ErrorCode, TArray<int64>& OutWaiters) override
 	{ return Host.FaultTaskResult(Token, MoveTemp(ErrorCode), OutWaiters); }
 	bool FaultTaskResultLanguageError(int64 Token, FAvidScriptTaskLanguageError Error,
@@ -64,6 +73,7 @@ public:
 		{
 			bStableTerminalReads &= Previous->State == OutSnapshot.State
 				&& Previous->TypeId == OutSnapshot.TypeId && Previous->Value == OutSnapshot.Value
+				&& Previous->bValueRequiresLease == OutSnapshot.bValueRequiresLease
 				&& Previous->ErrorCode == OutSnapshot.ErrorCode
 				&& Previous->LanguageError.IsSet() == OutSnapshot.LanguageError.IsSet();
 			if (Previous->LanguageError.IsSet() && OutSnapshot.LanguageError.IsSet())

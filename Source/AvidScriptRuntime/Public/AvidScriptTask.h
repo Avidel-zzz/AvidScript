@@ -36,6 +36,14 @@ public:
 	virtual ~IAvidScriptTaskLanguageErrorLease() = default;
 };
 
+// Native ownership of a validated successful value. Guest bytes cannot create
+// this lease; the caller validates the value codec and acquires its roots first.
+class AVIDSCRIPTRUNTIME_API IAvidScriptTaskValueLease
+{
+public:
+	virtual ~IAvidScriptTaskValueLease() = default;
+};
+
 struct FAvidScriptTaskResultSnapshot
 {
 	EAvidScriptTaskResultState State = EAvidScriptTaskResultState::Running;
@@ -43,6 +51,8 @@ struct FAvidScriptTaskResultSnapshot
 	TArray<uint8> Value;
 	FString ErrorCode;
 	TOptional<FAvidScriptTaskLanguageError> LanguageError;
+	// A snapshot borrows value identity; it never retains the value's roots.
+	bool bValueRequiresLease = false;
 };
 
 // Native Session capability. Guest bytes must be validated against a versioned
@@ -83,4 +93,8 @@ public:
 		TArray<int64>& OutWaiters) = 0;
 	virtual bool ReadTaskResult(int64 Token,
 		FAvidScriptTaskResultSnapshot& OutSnapshot) const = 0;
+	virtual int64 CreateRootedTaskResult(FString TypeId) = 0;
+	virtual bool SucceedRootedTaskResult(int64 Token, TConstArrayView<uint8> Value,
+		TSharedPtr<IAvidScriptTaskValueLease> ValueLease,
+		TArray<int64>& OutWaiters) = 0;
 };

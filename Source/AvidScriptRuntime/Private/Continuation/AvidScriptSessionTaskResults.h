@@ -14,13 +14,16 @@ public:
 	static constexpr int32 MaximumWaiters = 4096;
 	static constexpr int32 MaximumValueBytes = 4096;
 
-	int64 Create(EAvidScriptContinuationLane Lane, uint64 ActivationSerial, FString TypeId);
+	int64 Create(EAvidScriptContinuationLane Lane, uint64 ActivationSerial, FString TypeId,
+		bool bValueRequiresLease = false);
 	bool Retain(int64 Token);
 	bool Release(int64 Token);
 	// The caller retains a task reference for each registered waiter.
 	EAvidScriptTaskWaitRegistration RegisterWaiter(int64 Token, int64 WaiterToken);
 	bool UnregisterWaiter(int64 Token, int64 WaiterToken);
 	bool Succeed(int64 Token, TConstArrayView<uint8> Value, TArray<int64>& OutWaiters);
+	bool SucceedRooted(int64 Token, TConstArrayView<uint8> Value,
+		TSharedPtr<IAvidScriptTaskValueLease> ValueLease, TArray<int64>& OutWaiters);
 	bool Fault(int64 Token, FString ErrorCode, TArray<int64>& OutWaiters);
 	bool FaultLanguageError(int64 Token, FAvidScriptTaskLanguageError Error,
 		TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease,
@@ -50,6 +53,8 @@ private:
 		EAvidScriptTaskResultState State = EAvidScriptTaskResultState::Running;
 		FString TypeId;
 		TArray<uint8> Value;
+		bool bValueRequiresLease = false;
+		TSharedPtr<IAvidScriptTaskValueLease> ValueRoot;
 		FString ErrorCode;
 		TOptional<FAvidScriptTaskLanguageError> LanguageError;
 		TSharedPtr<IAvidScriptTaskLanguageErrorLease> LanguageErrorRoot;
@@ -70,7 +75,8 @@ private:
 	bool Finish(int64 Token, EAvidScriptTaskResultState State,
 		TConstArrayView<uint8> Value, FString ErrorCode, TArray<int64>& OutWaiters,
 		TOptional<FAvidScriptTaskLanguageError> LanguageError = {},
-		TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease = nullptr);
+		TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease = nullptr,
+		TSharedPtr<IAvidScriptTaskValueLease> ValueLease = nullptr);
 
 	TArray<FSlot> Slots;
 	TArray<uint32> FreeSlots;

@@ -329,6 +329,14 @@ int64 FAvidScriptContinuationHostEndpoint::CreateTaskResult(FString TypeId)
 		: 0;
 }
 
+int64 FAvidScriptContinuationHostEndpoint::CreateRootedTaskResult(FString TypeId)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner();
+	return PinnedOwner
+		? PinnedOwner->TaskResults.Create(Lane, ActivationSerial, MoveTemp(TypeId), true)
+		: 0;
+}
+
 bool FAvidScriptContinuationHostEndpoint::RetainTaskResult(const int64 Token)
 {
 	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
@@ -381,6 +389,21 @@ bool FAvidScriptContinuationHostEndpoint::SucceedTaskResult(
 {
 	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
 	if (!PinnedOwner || !PinnedOwner->TaskResults.Succeed(Token, Value, OutWaiters))
+	{
+		return false;
+	}
+	PinnedOwner->QueueTaskWaiters(
+		Token, EAvidScriptTaskResultState::Succeeded, OutWaiters);
+	return true;
+}
+
+bool FAvidScriptContinuationHostEndpoint::SucceedRootedTaskResult(
+	const int64 Token, const TConstArrayView<uint8> Value,
+	TSharedPtr<IAvidScriptTaskValueLease> ValueLease, TArray<int64>& OutWaiters)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(Token);
+	if (!PinnedOwner || !PinnedOwner->TaskResults.SucceedRooted(
+		Token, Value, MoveTemp(ValueLease), OutWaiters))
 	{
 		return false;
 	}

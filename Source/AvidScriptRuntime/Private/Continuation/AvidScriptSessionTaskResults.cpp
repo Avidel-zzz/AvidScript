@@ -55,7 +55,7 @@ const FAvidScriptSessionTaskResults::FSlot* FAvidScriptSessionTaskResults::Find(
 int64 FAvidScriptSessionTaskResults::Create(
 	const EAvidScriptContinuationLane Lane,
 	const uint64 ActivationSerial,
-	FString TypeId)
+	FString TypeId, const bool bValueRequiresLease)
 {
 	check(IsInGameThread());
 	if (ActivationSerial == 0 || TypeId.IsEmpty() || OccupiedCount >= MaximumTasks)
@@ -78,6 +78,7 @@ int64 FAvidScriptSessionTaskResults::Create(
 	Entry.Lane = Lane;
 	Entry.ActivationSerial = ActivationSerial;
 	Entry.TypeId = MoveTemp(TypeId);
+	Entry.bValueRequiresLease = bValueRequiresLease;
 	++OccupiedCount;
 	return PackToken(SlotIndex, Generation);
 }
@@ -165,12 +166,16 @@ bool FAvidScriptSessionTaskResults::Finish(
 	FString ErrorCode,
 	TArray<int64>& OutWaiters,
 	TOptional<FAvidScriptTaskLanguageError> LanguageError,
-	TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease)
+	TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease,
+	TSharedPtr<IAvidScriptTaskValueLease> ValueLease)
 {
 	check(IsInGameThread());
 	FSlot* const Slot = Find(Token);
 	if (Slot == nullptr || Slot->Entry->State != EAvidScriptTaskResultState::Running
 		|| Value.Num() > MaximumValueBytes
+		|| (State == EAvidScriptTaskResultState::Succeeded
+			&& Slot->Entry->bValueRequiresLease) != ValueLease.IsValid()
+		|| (ValueLease.IsValid() && Value.IsEmpty())
 		|| (State == EAvidScriptTaskResultState::Faulted && ErrorCode.IsEmpty())
 		|| LanguageError.IsSet() != RootLease.IsValid()
 		|| (LanguageError.IsSet() && State != EAvidScriptTaskResultState::Faulted
@@ -190,6 +195,7 @@ bool FAvidScriptSessionTaskResults::Finish(
 	Entry.ErrorCode = MoveTemp(ErrorCode);
 	Entry.LanguageError = MoveTemp(LanguageError);
 	Entry.LanguageErrorRoot = MoveTemp(RootLease);
+	Entry.ValueRoot = MoveTemp(ValueLease);
 	WaiterCount -= Entry.Waiters.Num();
 	OutWaiters = MoveTemp(Entry.Waiters);
 	if (Entry.ReferenceCount == 0)
@@ -206,6 +212,15 @@ bool FAvidScriptSessionTaskResults::Succeed(
 	const int64 Token, const TConstArrayView<uint8> Value, TArray<int64>& OutWaiters)
 {
 	return Finish(Token, EAvidScriptTaskResultState::Succeeded, Value, {}, OutWaiters);
+}
+
+bool FAvidScriptSessionTaskResults::SucceedRooted(
+	const int64 Token, const TConstArrayView<uint8> Value,
+	TSharedPtr<IAvidScriptTaskValueLease> ValueLease, TArray<int64>& OutWaiters)
+{
+	if (!ValueLease.IsValid()) return false;
+	return Finish(Token, EAvidScriptTaskResultState::Succeeded, Value, {},
+		OutWaiters, {}, nullptr, MoveTemp(ValueLease));
 }
 
 bool FAvidScriptSessionTaskResults::Fault(
@@ -248,6 +263,7 @@ bool FAvidScriptSessionTaskResults::PropagateFailure(
 	if (Source.Lane != Target.Lane
 		|| Source.ActivationSerial != Target.ActivationSerial
 		|| Source.TypeId != Target.TypeId
+		|| Source.bValueRequiresLease != Target.bValueRequiresLease
 		|| Target.State != EAvidScriptTaskResultState::Running)
 	{
 		return false;
@@ -297,6 +313,7 @@ bool FAvidScriptSessionTaskResults::Read(
 	OutSnapshot.Value = Entry.Value;
 	OutSnapshot.ErrorCode = Entry.ErrorCode;
 	OutSnapshot.LanguageError = Entry.LanguageError;
+	OutSnapshot.bValueRequiresLease = Entry.bValueRequiresLease;
 	return true;
 }
 

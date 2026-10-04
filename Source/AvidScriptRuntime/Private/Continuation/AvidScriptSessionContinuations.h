@@ -68,6 +68,7 @@ public:
 	bool ReadManagedState(int64 ContinuationToken,
 		const FAvidScriptWasmRuntimeInstance& Runtime, TArrayView<uint8> OutStateBytes) override;
 	int64 CreateTaskResult(FString TypeId) override;
+	int64 CreateRootedTaskResult(FString TypeId) override;
 	bool RetainTaskResult(int64 Token) override;
 	bool ReleaseTaskResult(int64 Token) override;
 	bool HasTaskResultType(int64 Token, const FString& TypeId) const override;
@@ -77,6 +78,9 @@ public:
 	bool RetainTaskForContinuation(
 		int64 TaskToken, int64 ContinuationToken) override;
 	bool SucceedTaskResult(int64 Token, TConstArrayView<uint8> Value,
+		TArray<int64>& OutWaiters) override;
+	bool SucceedRootedTaskResult(int64 Token, TConstArrayView<uint8> Value,
+		TSharedPtr<IAvidScriptTaskValueLease> ValueLease,
 		TArray<int64>& OutWaiters) override;
 	bool FaultTaskResult(int64 Token, FString ErrorCode, TArray<int64>& OutWaiters) override;
 	bool FaultTaskResultLanguageError(int64 Token,
