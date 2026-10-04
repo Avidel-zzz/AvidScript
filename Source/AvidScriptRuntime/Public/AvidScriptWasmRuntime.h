@@ -21,6 +21,7 @@ class FAvidScriptWasmDebugMap;
 class IAvidScriptTaskHost;
 struct FAvidScriptTaskLanguageError;
 class FAvidScriptLanguageErrorCatalog;
+class FAvidScriptWasmTaskValueCatalog;
 class FAvidScriptProfilerEventBuffer;
 class UWorld;
 class FProperty;
@@ -320,6 +321,7 @@ public:
 		EAvidScriptVmArtifactTrust ArtifactTrust,
 		FAvidScriptWasmSmokeResult& OutResult);
 	const FAvidScriptLanguageErrorCatalog* GetLanguageErrorCatalog() const;
+	const FAvidScriptWasmTaskValueCatalog* GetTaskValueCatalog() const;
 	bool ValidateRequiredExports(
 		const TArray<FString>& RequiredExports,
 		FAvidScriptWasmSmokeResult& OutResult);
@@ -1104,6 +1106,7 @@ private:
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
 	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;
 	TUniquePtr<FAvidScriptLanguageErrorCatalog> LanguageErrorCatalog;
+	TUniquePtr<FAvidScriptWasmTaskValueCatalog> TaskValueCatalog;
 	TArray<FAvidScriptVmTypedHostImport> SupplementalTypedHostImports;
 	TSharedPtr<FAvidScriptGeneratedTypeHostBindings> GeneratedTypeHostBindings;
 	TArray<FAvidScriptVmTypedHostImport> TypedHostImports;

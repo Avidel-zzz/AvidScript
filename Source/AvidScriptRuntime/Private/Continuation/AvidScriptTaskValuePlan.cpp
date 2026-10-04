@@ -4,10 +4,7 @@
 
 namespace AvidScript::TaskResult
 {
-namespace ValuePlanPrivate
-{
-bool Alignment(std::uint32_t Value) { return Value != 0 && Value <= 16 && (Value & (Value - 1)) == 0; }
-bool IdentityUtf8(std::span<const std::uint8_t> Bytes)
+bool IsValueIdentityUtf8(std::span<const std::uint8_t> Bytes)
 {
     // Reject overlong encodings, surrogate code points, controls and truncation.
     bool HasNonWhitespace = false;
@@ -34,6 +31,9 @@ bool IdentityUtf8(std::span<const std::uint8_t> Bytes)
     }
     return HasNonWhitespace || Bytes.empty();
 }
+namespace ValuePlanPrivate
+{
+bool Alignment(std::uint32_t Value) { return Value != 0 && Value <= 16 && (Value & (Value - 1)) == 0; }
 class FReader
 {
 public:
@@ -50,7 +50,7 @@ public:
         if (!U32(Count) || Count > ValueAbi::MaxIdentityBytes || (!Optional && Count == 0)
             || Bytes.size() - Position < Count) return false;
         const auto Text = Bytes.subspan(Position, Count);
-        if (!IdentityUtf8(Text) || (!Optional && std::all_of(Text.begin(), Text.end(),
+        if (!IsValueIdentityUtf8(Text) || (!Optional && std::all_of(Text.begin(), Text.end(),
             [](std::uint8_t C) { return C == ' '; }))) return false;
         Out.assign(reinterpret_cast<const char*>(Text.data()), Count); Position += Count; return true;
     }

@@ -24,9 +24,7 @@ internal sealed class WasmManagedHeapPlan
         GuestType[] references = module.Types.Where(type => type.Kind == "managed_ref" && type.ElementTypeId is not null).OrderBy(type => type.Id, StringComparer.Ordinal).ToArray();
         WasmManagedHeapPlan plan = new() { StackStart = module.MemoryLayout.HeapStart, InitializedGlobalIndex = cooperative ? 2u : 1u };
         if (!module.Types.Any(type => type.Kind == "managed_ref")) return plan;
-        for (int index = 0; index < references.Length; ++index) plan.TypeOrdinals.Add(references[index].Id, index + 1);
-        foreach (GuestType erased in module.Types.Where(type => type.Kind == "managed_ref" && type.ElementTypeId is null))
-            plan.TypeOrdinals.Add(erased.Id, 0);
+        foreach (var entry in GuestManagedHeap.TypeOrdinals(module.Types)) plan.TypeOrdinals.Add(entry.Key, entry.Value);
         List<byte> bytes = new();
         void U32(uint value)
         {

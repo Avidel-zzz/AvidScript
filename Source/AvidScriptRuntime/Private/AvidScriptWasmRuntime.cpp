@@ -2,6 +2,7 @@
 #include "AvidScriptContinuationCancellationAbi.h"
 #include "AvidScriptEventStateAbi.h"
 #include "AvidScriptLanguageErrorCatalog.h"
+#include "Continuation/AvidScriptWasmTaskValueCatalog.h"
 #include "AvidScriptWasmRuntimePrivate.h"
 
 #include "AvidScriptBindingDescriptor.h"
@@ -651,6 +652,11 @@ const FAvidScriptLanguageErrorCatalog* FAvidScriptWasmRuntimeInstance::GetLangua
 	return LanguageErrorCatalog.Get();
 }
 
+const FAvidScriptWasmTaskValueCatalog* FAvidScriptWasmRuntimeInstance::GetTaskValueCatalog() const
+{
+	return TaskValueCatalog.Get();
+}
+
 bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 	FString& OutError)
 {
@@ -1285,6 +1291,15 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 	}
 
 	FAvidScriptVmError Error;
+	TUniquePtr<FAvidScriptWasmTaskValueCatalog> CandidateTaskValues;
+	FString TaskValueMetadataError;
+	if (!FAvidScriptWasmTaskValueCatalog::ReadFromCanonicalWasm(
+		Artifact.CanonicalWasmBytes, InModuleId, CandidateTaskValues, TaskValueMetadataError))
+	{
+		SetFailure(OutResult, ModuleId, TEXT("<module>"), TEXT("invalid_task_value_metadata"),
+			TaskValueMetadataError, TEXT("rebuild the canonical WASM from validated Guest types"));
+		return false;
+	}
 	VmBackend = CreateAvidScriptVmBackend(BackendSelection, Error);
 	if (!VmBackend)
 	{
@@ -1412,6 +1427,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 		return false;
 	}
 	LanguageErrorCatalog = MoveTemp(CandidateLanguageErrors);
+	TaskValueCatalog = MoveTemp(CandidateTaskValues);
 	return true;
 }
 bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
@@ -3032,6 +3048,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	BindingPackage.Reset();
 	DebugMap.Reset();
 	LanguageErrorCatalog.Reset();
+	TaskValueCatalog.Reset();
 	BindingInvocationScratch.Reset();
 	FusedCallbackFrameStack.Reset();
 	InvalidateSelfCapability();

@@ -14,6 +14,17 @@ public static class GuestManagedHeap
     public const int MaxObjectBytes = 65536;
     public const int MaxStaticSlots = 4096;
 
+    // Shared by emitted heap configuration and module-owned Task value catalogs.
+    public static Dictionary<string, int> TypeOrdinals(IReadOnlyList<GuestType> types)
+    {
+        Dictionary<string, int> result = new(StringComparer.Ordinal);
+        foreach (GuestType type in types.Where(type => type.Kind == "managed_ref" && type.ElementTypeId is not null)
+            .OrderBy(type => type.Id, StringComparer.Ordinal)) result.Add(type.Id, result.Count + 1);
+        foreach (GuestType type in types.Where(type => type.Kind == "managed_ref" && type.ElementTypeId is null))
+            result.Add(type.Id, 0);
+        return result;
+    }
+
     public static bool ContainsReferences(IReadOnlyDictionary<string, GuestType> types, string id)
     {
         Stack<string> pending = new(); HashSet<string> seen = new(StringComparer.Ordinal); pending.Push(id);

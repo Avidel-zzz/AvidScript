@@ -12,6 +12,7 @@ using namespace AvidScript::Managed;
 int RunManagedStaticTests();
 int RunManagedNativeDataTests();
 int RunTaskValueTests();
+int RunTaskValueCatalogTests();
 namespace
 {
 const std::array<FHeapLayout, 3> Layouts{{{1, 16, {{0, 0}}}, {2, 8, {}}, {3, 16, {{0, 1}}}}};
@@ -456,7 +457,7 @@ int main()
 		TypedReferencesAndRanges(); AllocationLimits(); InvalidLayouts(); GenerationRetirement(); GraphOracle();
 		ProtocolExecution(); ProtocolRejections(); ProtocolLimitsAndRanges(); ProtocolRootsOnly(); ProtocolRootAuthority();
 		PersistentRootsOwnGraphs(); PersistentRootAcquisitionIsAtomic(); PersistentRootsOutliveHeapSafely();
-		const int Total = 18 + RunManagedStaticTests() + RunManagedNativeDataTests() + RunTaskValueTests();
+		const int Total = 18 + RunManagedStaticTests() + RunManagedNativeDataTests() + RunTaskValueTests() + RunTaskValueCatalogTests();
 		std::cout << "AvidScript.ManagedHeap.Tests: " << Total << '/' << Total
 			<< " passed (6000 graph-oracle steps; full root generation retirement; wire protocol; persistent leases; static domain roots)\n";
 		return 0;

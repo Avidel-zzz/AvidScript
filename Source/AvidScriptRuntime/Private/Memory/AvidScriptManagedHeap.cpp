@@ -126,6 +126,24 @@ EHeapError FHeap::Ready() const
 	return bConfigured ? EHeapError::Ok : EHeapError::NotConfigured;
 }
 
+bool FHeap::MatchesLayouts(std::span<const FHeapLayout> Expected) const
+{
+	if (Ready() != EHeapError::Ok || Expected.size() != Layouts.size()) return false;
+	for (std::size_t Index = 0; Index < Expected.size(); ++Index)
+	{
+		const auto& Layout = Expected[Index];
+		if (std::any_of(Expected.begin(), Expected.begin() + Index,
+			[&](const FHeapLayout& Previous) { return Previous.TypeId == Layout.TypeId; })) return false;
+		const auto Slot = LayoutIndex(Layout.TypeId);
+		if (Slot == InvalidIndex || Layout.ByteSize != Layouts[Slot].ByteSize
+			|| Layout.References.size() != Layouts[Slot].References.size()) return false;
+		for (std::size_t I = 0; I < Layout.References.size(); ++I)
+			if (Layout.References[I].Offset != Layouts[Slot].References[I].Offset
+				|| Layout.References[I].TargetTypeId != Layouts[Slot].References[I].TargetTypeId) return false;
+	}
+	return true;
+}
+
 EHeapError FHeap::ConfigureRootsOnly()
 {
 	const EHeapError State = Ready();

@@ -11,7 +11,7 @@ internal static class Program
                 + WasmBorrowedReferenceTests.Run() + WasmFramedCallTests.Run() + WasmContinuationStateTests.Run() + WasmEventStateTests.Run()
                 + WasmOutcomeSlotTests.Run() + WasmTaskResultTests.Run()
                 + WasmTaskLanguageErrorTests.Run() + WasmTaskCancellationErrorTests.Run() + WasmStaticStorageTests.Run()
-                + WasmTaskErrorTransferTests.Run() + WasmCancellationTokenTests.Run();
+                + WasmTaskErrorTransferTests.Run() + WasmCancellationTokenTests.Run() + WasmTaskValueCatalogTests.Run();
             Console.WriteLine($"AvidScript.WasmBackend.Tests: {count}/{count} passed");
             return 0;
         }

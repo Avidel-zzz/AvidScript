@@ -48,4 +48,6 @@ private:
 
 // Failure preserves OutPlan. Bounded allocations only after header admission.
 EValueError ReadValuePlan(std::span<const std::uint8_t> Packet, FValuePlan& OutPlan);
+// Shared strict identity grammar for value plans and their module catalog.
+bool IsValueIdentityUtf8(std::span<const std::uint8_t> Bytes);
 }

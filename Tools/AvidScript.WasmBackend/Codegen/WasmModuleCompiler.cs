@@ -76,6 +76,12 @@ public static class WasmModuleCompiler
         List<GuestWasmDebugOffset> debugOffsets = new();
         writer.WriteBytes(Header);
         WriteProvenanceSection(writer, module);
+        if (module.TaskValueCatalog is not null)
+            writer.WriteSection(0, section =>
+            {
+                section.WriteName(GuestTaskValueCatalog.SectionName);
+                section.WriteBytes(GuestTaskValueCatalog.Encode(module));
+            });
         WriteLanguageErrorCatalogSection(writer, module);
         WriteCallFrameSection(writer, layout);
         WriteHostCallFrameSection(writer, module, layout);

@@ -31,6 +31,7 @@ public static class GuestModuleValidator
         IndexTopLevelIds(context);
         ValidateTypes(context);
         GuestCanonicalTypeValidator.Validate(context);
+        GuestTaskValueCatalogValidator.Validate(context);
         GuestLanguageOutcomeTypeValidator.Validate(context);
         GuestLanguageOutcomeFlowValidator.Validate(context);
         GuestTaskErrorTransferValidator.Validate(context);

@@ -131,6 +131,8 @@ public:
 	FHeap(const FHeap&) = delete;
 	FHeap& operator=(const FHeap&) = delete;
 	EHeapError Configure(std::span<const FHeapLayout> InLayouts);
+	// Native metadata check; layout configuration is immutable for this heap.
+	bool MatchesLayouts(std::span<const FHeapLayout> Expected) const;
 	// No object allocation authority; only frames and null roots are available.
 	EHeapError ConfigureRootsOnly();
 	// Slots are native GC roots, never ordinary root tokens or linear-memory state.
