@@ -114,7 +114,9 @@ function Publish-AvidScriptBindingFilePairAtomic {
         [Parameter(Mandatory = $true)][string]$FirstSourcePath,
         [Parameter(Mandatory = $true)][string]$FirstDestinationPath,
         [Parameter(Mandatory = $true)][string]$SecondSourcePath,
-        [Parameter(Mandatory = $true)][string]$SecondDestinationPath
+        [Parameter(Mandatory = $true)][string]$SecondDestinationPath,
+        [string]$FirstExpectedSha256 = '',
+        [string]$SecondExpectedSha256 = ''
     )
 
     $TransactionId = "$PID.$([System.Guid]::NewGuid().ToString('N'))"
@@ -126,6 +128,7 @@ function Publish-AvidScriptBindingFilePairAtomic {
             Backup = ""
             HadExisting = $false
             Published = $false
+            ExpectedSha256 = $FirstExpectedSha256
         },
         [pscustomobject]@{
             Source = Get-AvidScriptBindingFullPath $SecondSourcePath
@@ -134,9 +137,13 @@ function Publish-AvidScriptBindingFilePairAtomic {
             Backup = ""
             HadExisting = $false
             Published = $false
+            ExpectedSha256 = $SecondExpectedSha256
         })
 
     foreach ($File in $Files) {
+        if ($File.ExpectedSha256 -and -not (Test-AvidScriptBindingSha256 $File.ExpectedSha256)) {
+            throw 'Atomic pair expected identity must be a lowercase SHA-256.'
+        }
         if (-not (Test-Path -LiteralPath $File.Source -PathType Leaf)) {
             throw "Atomic pair source file is missing: $($File.Source)"
         }
@@ -159,8 +166,11 @@ function Publish-AvidScriptBindingFilePairAtomic {
     try {
         foreach ($File in $Files) {
             Copy-Item -LiteralPath $File.Source -Destination $File.Temporary -Force
-            if ((Get-AvidScriptBindingSha256Hex $File.Temporary) -cne
-                (Get-AvidScriptBindingSha256Hex $File.Source)) {
+            $StagedSha256 = Get-AvidScriptBindingSha256Hex $File.Temporary
+            if ($File.ExpectedSha256 -and $StagedSha256 -cne $File.ExpectedSha256) {
+                throw "Atomic pair staging differs from verified bytes: $($File.Source)"
+            }
+            if ($StagedSha256 -cne (Get-AvidScriptBindingSha256Hex $File.Source)) {
                 throw "Atomic pair staging SHA-256 mismatch: $($File.Source)"
             }
         }

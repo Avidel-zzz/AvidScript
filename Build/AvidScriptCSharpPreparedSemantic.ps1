@@ -182,7 +182,8 @@ function Import-AvidScriptCSharpPreparedSemantic {
         [AllowNull()][object]$ExpectedLanguageProfile,
         [Parameter(Mandatory = $true)][string]$FrontendDestinationPath,
         [Parameter(Mandatory = $true)][string]$SemanticDestinationPath,
-        [string]$ExpectedSourceId = ""
+        [string]$ExpectedSourceId = "",
+        [switch]$BuildMetadataView
     )
 
     $ProjectRootFullPath = Get-AvidScriptBindingFullPath $ProjectRoot
@@ -389,10 +390,20 @@ function Import-AvidScriptCSharpPreparedSemantic {
         -Path $FrontendSourcePath `
         -Code "ASBI4403" `
         -Label "Prepared frontend artifact"
-    $SemanticModel = Import-AvidScriptPreparedSemanticJson `
-        -Path $SemanticSourcePath `
-        -Code "ASBI4403" `
-        -Label "Prepared semantic artifact"
+    $ProfileAdmission = $null
+    $UsesBuildMetadataView = $BuildMetadataView -and $null -ne $ExpectedLanguageProfile
+    if ($UsesBuildMetadataView) {
+        try {
+            $ProfileAdmission = Get-AvidScriptCSharpProfileAdmission -Profile $ExpectedLanguageProfile `
+                -SemanticPath $SemanticSourcePath -ModuleId ([string]$PreparedReport.module_id) -IncludeBuildMetadata
+            $SemanticModel = $ProfileAdmission.build_metadata.model
+        }
+        catch { Fail-AvidScriptPreparedSemantic -Code 'ASBI4403' -Message $_.Exception.Message }
+    }
+    else {
+        $SemanticModel = Import-AvidScriptPreparedSemanticJson `
+            -Path $SemanticSourcePath -Code "ASBI4403" -Label "Prepared semantic artifact"
+    }
 
     Assert-AvidScriptPreparedSemantic `
         -Condition ([int]$PreparedReport.frontend.schema_version -eq 1 -and
@@ -411,11 +422,15 @@ function Import-AvidScriptCSharpPreparedSemantic {
     $SupportedSemanticPair =
         ([int]$SemanticModel.schema_version -eq 31 -and [string]$SemanticModel.semantic_version -ceq '1.40') -or
         ([int]$SemanticModel.schema_version -eq 45 -and [string]$SemanticModel.semantic_version -ceq '1.54')
-    $ProfileAdmission = $null
     if ($null -ne $ExpectedLanguageProfile) {
         try {
-            $ProfileAdmission = Get-AvidScriptCSharpProfileAdmission -Profile $ExpectedLanguageProfile `
-                -SemanticPath $SemanticSourcePath -ModuleId ([string]$PreparedReport.module_id)
+            if ($null -eq $ProfileAdmission) {
+                $ProfileAdmission = Get-AvidScriptCSharpProfileAdmission -Profile $ExpectedLanguageProfile `
+                    -SemanticPath $SemanticSourcePath -ModuleId ([string]$PreparedReport.module_id)
+            }
+            if ([string]$ProfileAdmission.semantic_sha256 -cne $ActualSemanticSha256) {
+                throw 'Profile admission differs from the already verified Semantic bytes.'
+            }
             $SupportedSemanticPair = $true
         }
         catch { Fail-AvidScriptPreparedSemantic -Code 'ASBI4403' -Message $_.Exception.Message }
@@ -442,11 +457,14 @@ function Import-AvidScriptCSharpPreparedSemantic {
         -FirstSourcePath $FrontendSourcePath `
         -FirstDestinationPath $FrontendDestinationFullPath `
         -SecondSourcePath $SemanticSourcePath `
-        -SecondDestinationPath $SemanticDestinationFullPath
+        -SecondDestinationPath $SemanticDestinationFullPath `
+        -FirstExpectedSha256 $ActualFrontendSha256 `
+        -SecondExpectedSha256 $ActualSemanticSha256
 
     return [pscustomobject]@{
         FrontendModel = $FrontendModel
         SemanticModel = $SemanticModel
+        BuildMetadataViewUsed = [bool]$UsesBuildMetadataView
         ProfileAdmission = $ProfileAdmission
         PreparedReportPath = $PreparedReportFullPath
         PreparedReportSha256 = Get-AvidScriptBindingSha256Hex $PreparedReportFullPath

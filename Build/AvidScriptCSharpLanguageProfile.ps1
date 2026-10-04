@@ -70,14 +70,21 @@ function Get-AvidScriptCSharpProfileToolIdentity {
 }
 
 function Get-AvidScriptCSharpProfileAdmission {
-    param([Parameter(Mandatory = $true)]$Profile, [Parameter(Mandatory = $true)][string]$SemanticPath, [string]$ModuleId = '')
+    param([Parameter(Mandatory = $true)]$Profile, [Parameter(Mandatory = $true)][string]$SemanticPath,
+        [string]$ModuleId = '', [switch]$IncludeBuildMetadata)
     $Arguments = @('--validate-language-profile', [string]$Profile.Identity.name, '--semantic', $SemanticPath)
     if (-not [string]::IsNullOrWhiteSpace($ModuleId)) { $Arguments += @('--module-id', $ModuleId) }
+    if ($IncludeBuildMetadata) { $Arguments += '--include-build-metadata' }
     $Admission = Invoke-AvidScriptCSharpProfileTool -Profile $Profile -Arguments $Arguments
     Assert-AvidScriptCSharpProfileIdentity -Expected $Profile.Identity -Actual $Admission.language_profile
     if ([int]$Admission.schema_version -ne 1 -or
         [string]$Admission.semantic_sha256 -cne (Get-FileHash -LiteralPath $SemanticPath -Algorithm SHA256).Hash.ToLowerInvariant()) {
         throw 'ASBI4701: Profile admission does not identify the current Semantic bytes.'
+    }
+    if ($IncludeBuildMetadata -and ($null -eq $Admission.PSObject.Properties['build_metadata'] -or
+        [int]$Admission.build_metadata.schema_version -ne 1 -or
+        $Admission.build_metadata.model -isnot [System.Management.Automation.PSCustomObject])) {
+        throw 'ASBI4701: Profile admission did not return the requested build metadata contract.'
     }
     return $Admission
 }

@@ -102,7 +102,7 @@ try {
     $Toolchain = Join-Path $Scratch 'Toolchain'
     Write-Fixture (Join-Path $Toolchain 'global.json') '{"sdk":{"version":"8.0.416"}}'
     foreach ($Name in @('InvokeCSharpFrontend', 'InvokeCSharpSemantic', 'InvokeCSharpGuestCompiler',
-        'AvidScriptCSharpCompilerWorker', 'AvidScriptCSharpPreparedSemantic', 'AvidScriptCSharpBindingPackage',
+        'AvidScriptCSharpCompilerWorker', 'AvidScriptCSharpPreparedSemantic', 'AvidScriptCSharpBindingPackage', 'AvidScriptCSharpLanguageProfile',
         'AvidScriptCSharpSemanticCache', 'AvidScriptCSharpCompilationCache', 'BuildCSharpActorLifecycle')) {
         Write-Fixture (Join-Path $Toolchain "Build/$Name.ps1") "# $Name fixture"
     }

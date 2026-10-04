@@ -76,6 +76,7 @@ function Get-AvidScriptSemanticCacheToolchainFiles {
         (Join-Path $PluginRootFullPath "Build\InvokeCSharpSemantic.ps1"),
         (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpCompilerWorker.ps1"),
         (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpBindingPackage.ps1"),
+        (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpLanguageProfile.ps1"),
         (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpPreparedSemantic.ps1"),
         (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpSemanticCache.ps1"),
         (Join-Path $PluginRootFullPath "Build\BuildCSharpActorLifecycle.ps1"))
@@ -629,7 +630,8 @@ function Import-AvidScriptCSharpSemanticCacheEntry {
         [Parameter(Mandatory = $true)][string]$FrontendDestinationPath,
         [Parameter(Mandatory = $true)][string]$SemanticDestinationPath,
         [AllowNull()][object]$CacheLock,
-        [string]$ExpectedSourceId = ""
+        [string]$ExpectedSourceId = "",
+        [switch]$BuildMetadataView
     )
 
     $CanIsolate = $false
@@ -717,7 +719,8 @@ function Import-AvidScriptCSharpSemanticCacheEntry {
             -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
             -ExpectedLanguageProfile $Context.LanguageProfile `
             -FrontendDestinationPath $FrontendDestinationPath `
-            -SemanticDestinationPath $SemanticDestinationPath
+            -SemanticDestinationPath $SemanticDestinationPath `
+            -BuildMetadataView:$BuildMetadataView
         return [pscustomobject]@{
             Status = "hit"
             DiagnosticCode = ""
@@ -726,6 +729,7 @@ function Import-AvidScriptCSharpSemanticCacheEntry {
             EntryReportSha256 = [string]$Prepared.PreparedReportSha256
             FrontendModel = $Prepared.FrontendModel
             SemanticModel = $Prepared.SemanticModel
+            BuildMetadataViewUsed = $Prepared.BuildMetadataViewUsed
             ProfileAdmission = $Prepared.ProfileAdmission
         }
     }
@@ -899,7 +903,8 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
                 -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
                 -ExpectedLanguageProfile $Context.LanguageProfile `
                 -FrontendDestinationPath $ValidationFrontendPath `
-                -SemanticDestinationPath $ValidationSemanticPath
+                -SemanticDestinationPath $ValidationSemanticPath `
+                -BuildMetadataView:($null -ne $Context.LanguageProfile)
         }
         catch {
             Fail-AvidScriptCSharpSemanticCache `
@@ -1063,7 +1068,8 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
             -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
             -ExpectedLanguageProfile $Context.LanguageProfile `
             -FrontendDestinationPath (Join-Path $ValidationDirectory "staging.frontend.json") `
-            -SemanticDestinationPath (Join-Path $ValidationDirectory "staging.semantic.json") | Out-Null
+            -SemanticDestinationPath (Join-Path $ValidationDirectory "staging.semantic.json") `
+            -BuildMetadataView:($null -ne $Context.LanguageProfile) | Out-Null
         Remove-Item -LiteralPath $StagingValidationReportPath -Force -ErrorAction Stop
 
         $WonPublication = $true
@@ -1089,7 +1095,8 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
             -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
             -FrontendDestinationPath (Join-Path $ValidationDirectory "published.frontend.json") `
             -SemanticDestinationPath (Join-Path $ValidationDirectory "published.semantic.json") `
-            -CacheLock $CacheLock
+            -CacheLock $CacheLock `
+            -BuildMetadataView:($null -ne $Context.LanguageProfile)
         if ($PublishedEntry.Status -cne "hit") {
             Fail-AvidScriptCSharpSemanticCache `
                 -Code "ASBI4504" `

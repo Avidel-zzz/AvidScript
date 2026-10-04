@@ -1472,7 +1472,8 @@ if ([string]::IsNullOrWhiteSpace($PreparedBuildReportPath) -and -not $DisableSem
             -ExpectedSourceId $SourceId `
             -ExpectedAuthorizationPackage $BindingAuthorizationInfo `
             -FrontendDestinationPath $FrontendArtifactPath `
-            -SemanticDestinationPath $SemanticArtifactPath
+            -SemanticDestinationPath $SemanticArtifactPath `
+            -BuildMetadataView:($null -ne $ResolvedLanguageProfile)
         $SemanticCache.lookup = [string]$CacheImport.Status
         $SemanticCache.diagnostic_code = [string]$CacheImport.DiagnosticCode
         $SemanticCache.diagnostic_message = [string]$CacheImport.DiagnosticMessage
@@ -1533,7 +1534,8 @@ if (-not [string]::IsNullOrWhiteSpace($PreparedBuildReportPath)) {
             -ExpectedAuthorizationPackage $BindingAuthorizationInfo `
             -ExpectedLanguageProfile $ResolvedLanguageProfile `
             -FrontendDestinationPath $FrontendArtifactPath `
-            -SemanticDestinationPath $SemanticArtifactPath
+            -SemanticDestinationPath $SemanticArtifactPath `
+            -BuildMetadataView:($null -ne $ResolvedLanguageProfile)
         $FrontendModel = $PreparedSemantic.FrontendModel
         $SemanticModel = $PreparedSemantic.SemanticModel
         $ProfileAdmission = $PreparedSemantic.ProfileAdmission

@@ -99,7 +99,7 @@ $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
 - `async void` 异常报告、Session 候选回滚和[静态 / token 组合](Docs/Phase66/P66.C12_Async_Void_Composition_Contract.md)已有 Win64 双 VM 测试；[普通 Task 的静态状态 / catch / token 组合](Docs/Phase66/P66.C14_Static_Catch_Composition_Contract.md)也已覆盖。[Gameplay 配置](Docs/Phase66/P66.C16_Gameplay_Profile_Build_Contract.md)支持[缓存与 prepared 重用](Docs/Phase66/P66.C21_Source_Identity_Cache_Contract.md)，显式 `SourceId` 保留对应的源码映射；新生成的绑定包支持[标准 CancellationToken](Docs/Phase66/P66.C17_Generated_Cancellation_Token_Contract.md)。Editor 的构建、绑定、异步重载与编译失败保留旧实例已有自动化验证；[生成 Actor / Component 的共享状态与自然抛错回滚](Docs/Phase66/P66.C20_Shared_Generated_Reload_Contract.md)通过双 VM 的 36 组测试，真实 Editor Play 仍待完成。
 - 网络路径有自动化测试，真实多人游戏尚未验收；Shipping、Android 和 iOS 也尚未验收。
 
-语言边界见 [P66.C 执行计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)和[异步能力合同](Docs/Architecture/AvidScript_Composable_Capability_Contract.md)。[缓存构建优化](Docs/Phase66/P66.C23_Path_Validation_Cost_Contract.md)保留逐级路径校验；当前样例三轮中位数从约 6 秒降至 5.4 秒，语义读取与内存成本仍待优化。
+语言边界见 [P66.C 执行计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)和[异步能力合同](Docs/Architecture/AvidScript_Composable_Capability_Contract.md)。[缓存构建测量](Docs/Phase66/P66.C24_Build_Metadata_View_Contract.md)中，构建视图使探针 PowerShell 峰值从约 1.1 GiB 降至 576 MiB；热构建中位数约 6.4 秒，比上一轮 5.4 秒慢，延迟仍需优化。完整语义校验与发布字节校验保留。
 
 ## 许可证
 

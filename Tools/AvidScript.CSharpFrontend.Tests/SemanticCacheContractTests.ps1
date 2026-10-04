@@ -51,7 +51,7 @@ function Assert-CacheContextFailure {
 function Write-SemanticCacheToolchainOwners {
     param([Parameter(Mandatory = $true)][string]$Root)
 
-    foreach ($Name in @('AvidScriptCSharpCompilerWorker', 'AvidScriptCSharpBindingPackage', 'AvidScriptCSharpPreparedSemantic',
+    foreach ($Name in @('AvidScriptCSharpCompilerWorker', 'AvidScriptCSharpBindingPackage', 'AvidScriptCSharpLanguageProfile', 'AvidScriptCSharpPreparedSemantic',
         'AvidScriptCSharpSemanticCache', 'BuildCSharpActorLifecycle')) {
         Write-Utf8File -Path (Join-Path $Root "Build/$Name.ps1") -Text "# $Name fixture"
     }

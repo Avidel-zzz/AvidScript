@@ -91,6 +91,8 @@ internal static class CSharpGuestLanguageProfileTests
                         && record.GetProperty("semantic_sha256").GetString() == Hash(semanticBytes), label + " owner admission covers exact source and Guest bytes");
                     Check(record.GetProperty("semantic_succeeded").GetBoolean() == api.Succeeded
                         && record.GetProperty("source_id").GetString() == SourceId, label + " admission preserves source diagnostics and identity");
+                    Check(!record.TryGetProperty("build_metadata", out _), label + " default admission has no build view");
+                    CheckBuildMetadata(profile.Name, semanticBytes, record, Check, label);
                     using var admissionOutput = new StringWriter();
                     int admissionExit;
                     try { Console.SetOut(admissionOutput); admissionExit = GuestCommandLine.Run(new[] { "--validate-language-profile", profile.Name,
@@ -194,6 +196,7 @@ internal static class CSharpGuestLanguageProfileTests
                     "--debug-map", PathOf("cli.debug.json"), "--frontend-artifact-sha256", Hash(legacyFrontend) }) == 0
                 && File.ReadAllBytes(PathOf("cli.guest.json")).SequenceEqual(File.ReadAllBytes(PathOf("worker.guest.json"))), "legacy Guest pipeline remains byte-identical");
             byte[] validSource = File.ReadAllBytes(PathOf("semantic-worker.json"));
+            CheckBuildMetadataJsonGuards(profile.Name, validSource, Check);
             var unsupported = SemanticSerializer.Deserialize(validSource) with { SemanticVersion = "unsupported" };
             bool sourceRejected = false;
             try { CSharpLanguageProfileAdmission.Describe(profile.Name, SemanticSerializer.Serialize(unsupported)); }
@@ -230,6 +233,46 @@ internal static class CSharpGuestLanguageProfileTests
             if (!Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory);
         }
         return count;
+    }
+
+    private static void CheckBuildMetadata(string profile, byte[] bytes, JsonElement admission,
+        Action<bool, string> check, string label)
+    {
+        using var original = JsonDocument.Parse(bytes);
+        using var result = JsonDocument.Parse(CSharpLanguageProfileAdmission.Describe(profile, bytes,
+            "gameplay_profile_test", includeBuildMetadata: true));
+        var root = result.RootElement;
+        var view = root.GetProperty("build_metadata");
+        var model = view.GetProperty("model");
+        check(view.GetProperty("schema_version").GetInt32() == 1, label + " build view schema");
+        foreach (var property in admission.EnumerateObject())
+            check(JsonSerializer.Serialize(root.GetProperty(property.Name)) == JsonSerializer.Serialize(property.Value),
+                label + " view preserves original admission field " + property.Name);
+        check(!model.TryGetProperty("methods", out _) && !model.TryGetProperty("types", out _), label + " view excludes unused trees");
+        foreach (var property in model.EnumerateObject().Where(p => p.Name != "control_flow_graphs"))
+            check(JsonSerializer.Serialize(property.Value) == JsonSerializer.Serialize(original.RootElement.GetProperty(property.Name)),
+                label + " complete field " + property.Name);
+        var reachable = original.RootElement.GetProperty("reachability").GetProperty("reachable_callable_ids")
+            .EnumerateArray().Select(id => id.GetString()).ToHashSet(StringComparer.Ordinal);
+        var graphs = original.RootElement.GetProperty("control_flow_graphs").EnumerateArray()
+            .Where(graph => reachable.Contains(graph.GetProperty("method_symbol_id").GetString())).ToArray();
+        check(JsonSerializer.Serialize(graphs) == JsonSerializer.Serialize(model.GetProperty("control_flow_graphs")),
+            label + " view preserves all reachable graphs and order");
+    }
+
+    private static void CheckBuildMetadataJsonGuards(string profile, byte[] legacyBytes, Action<bool, string> check)
+    {
+        foreach (string payload in new[] { "{\"left\":1,\"LEFT\":2}", "{\"\":1}", "[{\"deep\":{\"a\":1,\"A\":2}}]" })
+        {
+            // Legacy schemas permit unknown fields; PowerShell rejects these
+            // property shapes even when the field is not used by the build.
+            string text = Encoding.UTF8.GetString(legacyBytes).TrimEnd();
+            byte[] malformedView = Encoding.UTF8.GetBytes(text[..^1] + ",\"ignored_payload\":" + payload + "}");
+            bool rejected = false;
+            try { CSharpLanguageProfileAdmission.Describe(profile, malformedView, includeBuildMetadata: true); }
+            catch (InvalidDataException) { rejected = true; }
+            check(rejected, "metadata rejects unmaterialized case-conflicting or empty keys");
+        }
     }
 
     private static void CheckUnusedTokenFacade(Action<bool, string> check)
