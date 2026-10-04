@@ -4,6 +4,9 @@ add_executable(AvidScriptManagedHeapTests
     AvidScriptManagedHeapTests.cpp
     AvidScriptManagedStaticTests.cpp
     AvidScriptManagedNativeDataTests.cpp
+    AvidScriptTaskValueTests.cpp
+    ../../Source/AvidScriptRuntime/Private/Continuation/AvidScriptTaskValuePlan.cpp
+    ../../Source/AvidScriptRuntime/Private/Continuation/AvidScriptTaskValueCapture.cpp
     ../../Source/AvidScriptRuntime/Private/Memory/AvidScriptManagedHeap.cpp
     ../../Source/AvidScriptRuntime/Private/Memory/AvidScriptManagedHeapNativeData.cpp
     ../../Source/AvidScriptRuntime/Private/Memory/AvidScriptManagedHeapProtocol.cpp)
