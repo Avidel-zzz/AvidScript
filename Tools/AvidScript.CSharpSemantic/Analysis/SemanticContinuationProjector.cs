@@ -24,7 +24,7 @@ internal static class SemanticContinuationProjector
         "global::AvidScript.AvidContinuationStatus";
     private const string LoadedObjectTypeName =
         "global::AvidScript.AvidLoadedObject";
-    internal const int CompilerCallbackIdStart = 0x40000000;
+    internal const int CompilerCallbackIdStart = SemanticContinuationCallback.CompilerCallbackIdStart;
     private const int MaximumAssetPathUtf8Bytes = 1024;
 
     public static SemanticContinuationProjection Project(SemanticCompilationContext context)

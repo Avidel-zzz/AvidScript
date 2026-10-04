@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--object-await-admission")
+            {
+                int focused = CSharpGuestObjectAwaitAdmissionTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.ObjectAwaitAdmission: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--language-profile")
             {
                 int focused = CSharpGuestLanguageProfileTests.Run();
@@ -319,6 +325,7 @@ internal static class Program
                 throw new ArgumentException("Supported arguments: --delegate-events, --captured-assignments, --lexical-captures, --reference-objects; omit arguments for the full suite.");
             }
             int count = CSharpGuestLoweringTests.Run()
+                + CSharpGuestObjectAwaitAdmissionTests.Run()
                 + CSharpGuestAsyncVoidCompositionTests.Run()
                 + CSharpGuestAsyncVoidReloadTests.Run()
                 + CSharpGuestAsyncVoidErrorOwnerTests.Run()

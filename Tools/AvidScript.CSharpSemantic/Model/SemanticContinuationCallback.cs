@@ -8,6 +8,8 @@ public sealed record SemanticContinuationCallback(
     [property: JsonPropertyOrder(2)] string MethodSymbolId,
     [property: JsonPropertyOrder(4)] SemanticSpan Span)
 {
+    public const int CompilerCallbackIdStart = 0x40000000;
+
     public const string NonePayloadKind = "none";
     public const string ObjectPayloadKind = "object";
     public const string ResultSlotPayloadKind = "result_slot";

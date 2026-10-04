@@ -9,7 +9,7 @@ namespace AvidScript.CSharpSemantic;
 // the Roslyn binder; this reader independently checks every dispatch/unwind edge.
 public static class SemanticAsyncCancellationPlanValidator
 {
-    public const string CancellationTypeId = "type:global::System.Threading.Tasks.TaskCanceledException";
+    public const string CancellationTypeId = SemanticAsyncExceptionPlan.TaskCancellationTypeId;
 
     public static bool IsValid(SemanticDocument document, SemanticAsyncMethod method)
     {

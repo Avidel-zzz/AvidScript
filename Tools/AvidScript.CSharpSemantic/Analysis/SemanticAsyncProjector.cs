@@ -50,7 +50,8 @@ internal static class SemanticAsyncProjector
         IReadOnlyList<SemanticCallable> callables,
         bool enableAsyncExceptionFlow = false,
         bool enableAsyncSynchronousExceptions = false,
-        bool enableAsyncVoidErrorOwner = false)
+        bool enableAsyncVoidErrorOwner = false,
+        bool enableObjectAwaitCancellation = false)
     {
         SemanticModel semanticModel = context.Compilation.GetSemanticModel(
             context.PrimaryUnit.SyntaxTree,
@@ -100,7 +101,7 @@ internal static class SemanticAsyncProjector
                 diagnostics,
                 ref nextCallbackId,
                 out SemanticAsyncMethod? projected, enableAsyncSynchronousExceptions,
-                enableAsyncVoidErrorOwner))
+                enableAsyncVoidErrorOwner, enableObjectAwaitCancellation))
             {
                 methods.Add(projected!);
                 controlledMethodIds.Add(projected!.MethodSymbolId);
@@ -153,7 +154,8 @@ internal static class SemanticAsyncProjector
         ref int nextCallbackId,
         out SemanticAsyncMethod? projected,
         bool enableAsyncSynchronousExceptions,
-        bool enableAsyncVoidErrorOwner)
+        bool enableAsyncVoidErrorOwner,
+        bool enableObjectAwaitCancellation)
     {
         projected = null;
         string methodSymbolId = SemanticSymbolProjector.GetSymbolId(method);
@@ -244,7 +246,8 @@ internal static class SemanticAsyncProjector
                 previewSuspendedFinally: (hasTaskResult || voidErrorOwner) && enableAsyncSynchronousExceptions,
                 allowDirectAwaitCleanup: voidErrorOwner,
                 allowAsyncCancellationFlow: (hasTaskResult || voidErrorOwner) && enableAsyncSynchronousExceptions,
-                allowSynchronousExceptions: (hasTaskResult || voidErrorOwner) && enableAsyncSynchronousExceptions)
+                allowSynchronousExceptions: (hasTaskResult || voidErrorOwner) && enableAsyncSynchronousExceptions,
+                allowObjectAwaitCancellation: enableObjectAwaitCancellation)
                 || !TryAttachStateFrames(
                     flowProjection!.Segments,
                     diagnostics,

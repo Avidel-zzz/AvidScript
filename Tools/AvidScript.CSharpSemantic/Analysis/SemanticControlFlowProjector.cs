@@ -28,7 +28,8 @@ internal static class SemanticControlFlowProjector
         bool enableDirectAwaitCleanup = false,
         bool enableAsyncCancellationFlow = false,
         bool enableAsyncSynchronousExceptions = false,
-        bool enableAsyncVoidErrorOwner = false)
+        bool enableAsyncVoidErrorOwner = false,
+        bool enableObjectAwaitCancellation = false)
     {
         List<SemanticDiagnostic> diagnostics = new();
         List<SemanticControlFlowGraph> graphs = new();
@@ -107,7 +108,8 @@ internal static class SemanticControlFlowProjector
                                         previewSuspendedFinally: true,
                                         allowDirectAwaitCleanup: enableDirectAwaitCleanup || enableAsyncVoidErrorOwner,
                                         allowAsyncCancellationFlow: enableAsyncCancellationFlow,
-                                        allowSynchronousExceptions: enableAsyncSynchronousExceptions)
+                                        allowSynchronousExceptions: enableAsyncSynchronousExceptions,
+                                        allowObjectAwaitCancellation: enableObjectAwaitCancellation)
                                     && preview is not null
                                     && preview.Segments.Any(segment => segment.Transfer is
                                         { Kind: SemanticAsyncMethod.AwaitTransferKind,

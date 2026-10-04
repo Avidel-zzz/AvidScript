@@ -115,6 +115,8 @@ public sealed record SemanticAsyncExceptionPlan(
     [property: JsonPropertyOrder(2)] IReadOnlyList<SemanticAsyncExceptionRegion> Regions,
     [property: JsonPropertyOrder(3)] IReadOnlyList<SemanticCatchHandler> Catches)
 {
+    public const string TaskCancellationTypeId = "type:global::System.Threading.Tasks.TaskCanceledException";
+
     // Schema 44 preserves cancellation as a typed exception and a distinct Task
     // terminal state. Older contracts must not reinterpret this owner model.
     [JsonPropertyOrder(4), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

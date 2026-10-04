@@ -49,7 +49,8 @@ internal static class SemanticAsyncControlFlowProjector
         bool previewSuspendedFinally = false,
         bool allowDirectAwaitCleanup = false,
         bool allowAsyncCancellationFlow = false,
-        bool allowSynchronousExceptions = false)
+        bool allowSynchronousExceptions = false,
+        bool allowObjectAwaitCancellation = false)
     {
         Builder builder = new(
             context,
@@ -61,7 +62,7 @@ internal static class SemanticAsyncControlFlowProjector
             resultType,
             previewSuspendedFinally,
             allowDirectAwaitCleanup,
-            allowAsyncCancellationFlow, allowSynchronousExceptions);
+            allowAsyncCancellationFlow, allowSynchronousExceptions, allowObjectAwaitCancellation);
         if (!builder.TryBuild(body, ref nextCallbackId, out projected))
         {
             projected = null;
@@ -83,6 +84,7 @@ internal static class SemanticAsyncControlFlowProjector
         private readonly bool allowDirectAwaitCleanup;
         private readonly bool allowAsyncCancellationFlow;
         private readonly bool allowSynchronousExceptions;
+        private readonly bool allowObjectAwaitCancellation;
         private readonly List<SemanticAsyncExceptionScopeDraft> exceptionScopes = new();
         private readonly List<DraftSegment> drafts = new();
         private readonly List<(string Kind, TextSpan TrySpan, TextSpan PartSpan,
@@ -109,7 +111,8 @@ internal static class SemanticAsyncControlFlowProjector
             bool previewSuspendedFinally,
             bool allowDirectAwaitCleanup,
             bool allowAsyncCancellationFlow,
-            bool allowSynchronousExceptions)
+            bool allowSynchronousExceptions,
+            bool allowObjectAwaitCancellation)
         {
             this.context = context;
             this.semanticModel = semanticModel;
@@ -122,7 +125,12 @@ internal static class SemanticAsyncControlFlowProjector
             this.allowDirectAwaitCleanup = allowDirectAwaitCleanup;
             this.allowAsyncCancellationFlow = allowAsyncCancellationFlow;
             this.allowSynchronousExceptions = allowSynchronousExceptions;
+            this.allowObjectAwaitCancellation = allowObjectAwaitCancellation;
         }
+
+        private bool AllowsDirectAwaitProducer(string producerKind) =>
+            allowDirectAwaitCleanup && producerKind is "delay" or "next_tick"
+            || allowObjectAwaitCancellation && producerKind == SemanticObjectAwaitCancellation.ProducerKind;
 
         public bool TryBuild(
             BlockSyntax body,
@@ -394,8 +402,7 @@ internal static class SemanticAsyncControlFlowProjector
                             ? faultCleanupTarget : -1,
                         null,
                         awaitSite.ProducerKind is "task_call" or "task_local"
-                            || (allowDirectAwaitCleanup
-                                && (awaitSite.ProducerKind is "delay" or "next_tick"))
+                            || AllowsDirectAwaitProducer(awaitSite.ProducerKind)
                             ? cancellationCleanupTarget : -1));
             }
 
@@ -802,8 +809,7 @@ internal static class SemanticAsyncControlFlowProjector
             if (entry < 0) return -1;
             if (drafts.Skip(firstProtectedDraft).Any(draft => draft.AwaitSite is
                 { ProducerKind: not ("task_call" or "task_local") } site
-                    && !(allowDirectAwaitCleanup
-                        && (site.ProducerKind is "delay" or "next_tick"))))
+                    && !AllowsDirectAwaitProducer(site.ProducerKind)))
                 return Reject("Async exception preview requires Task<int> await sites or opt-in direct await cleanup.",
                     statement.Span, "ASCS5420");
             previewRegions.Add(("try", statement.Span, statement.Block.Span,
@@ -930,8 +936,7 @@ internal static class SemanticAsyncControlFlowProjector
             if (previewSuspendedFinally && drafts.Skip(firstProtectedDraft)
                 .Any(draft => draft.AwaitSite is { } site
                     && site.ProducerKind is not ("task_call" or "task_local")
-                    && !(allowDirectAwaitCleanup
-                        && (site.ProducerKind is "delay" or "next_tick"))))
+                    && !AllowsDirectAwaitProducer(site.ProducerKind)))
             {
                 return Reject(
                     "Suspended cleanup preview currently requires Task<int> await sites.",

@@ -15,18 +15,23 @@ public static class SemanticComposableCapabilityValidator
                 && document.SchemaVersion != SemanticComposableCapabilities.AsyncVoidSchemaVersion
                 && document.SemanticVersion != SemanticComposableCapabilities.AsyncVoidSemanticVersion
                 && document.SchemaVersion != SemanticComposableCapabilities.StaticAsyncValueSchemaVersion
-                && document.SemanticVersion != SemanticComposableCapabilities.StaticAsyncValueSemanticVersion;
+                && document.SemanticVersion != SemanticComposableCapabilities.StaticAsyncValueSemanticVersion
+                && document.SchemaVersion != SemanticObjectAwaitCancellation.SchemaVersion
+                && document.SemanticVersion != SemanticObjectAwaitCancellation.SemanticVersion;
         bool voidOwners = SemanticComposableCapabilities.IsAsyncVoidVersion(document);
         bool staticAsyncValue = SemanticComposableCapabilities.IsStaticAsyncValueVersion(document);
+        bool objectCancellation = SemanticObjectAwaitCancellation.IsVersion(document);
         if (document.Language != "csharp" || document.Source is null
             || document.Types is null || document.Symbols is null
             || document.Methods is null || document.AsyncMethods is null
             || document.Types.Any(type => type is null || string.IsNullOrWhiteSpace(type.Id))
-            || !voidOwners && !staticAsyncValue && !document.Types.Any(type => type.Id == SemanticCancellationTokens.TypeId)
+            || !voidOwners && !staticAsyncValue && !objectCancellation
+                && !document.Types.Any(type => type.Id == SemanticCancellationTokens.TypeId)
             || document.AsyncMethods.Any(method => method?.Segments is null
                 || method.Segments.Any(segment => segment is null))
-            || !voidOwners && document.StaticInitialization is not { Types: { Count: > 0 } }
-            || document.CapabilityManifest is not { Capabilities: { Count: >= 2 and <= 6 } declared } manifest
+            || !voidOwners && !objectCancellation && document.StaticInitialization is not { Types: { Count: > 0 } }
+            || document.CapabilityManifest is not { Capabilities: { Count: >= 2 and <= 7 } declared } manifest
+            || !objectCancellation && declared.Count > 6
             || document.StaticInitialization is { } staticPlan
                 && (staticPlan.Types is not { Count: > 0 }
                     || staticPlan.BaseSchemaVersion != manifest.BaseSchemaVersion
@@ -34,7 +39,21 @@ public static class SemanticComposableCapabilityValidator
             || declared.Any(capability => capability is null
                 || string.IsNullOrWhiteSpace(capability.Id) || capability.Version != 1))
             return false;
-        var expected = SemanticComposableCapabilities.FromProjectedSource(document).Capabilities;
+        if (objectCancellation && (document.Symbols.Any(symbol => symbol is null)
+            || document.Types.Select(type => type.Id).Distinct(StringComparer.Ordinal).Count() != document.Types.Count
+            || document.Symbols.Select(symbol => symbol.Id).Distinct(StringComparer.Ordinal).Count() != document.Symbols.Count
+            || document.Methods.Any(method => method?.Root is null)
+            || document.AsyncMethods.Any(method => method.ExceptionPlan is { Catches: null }
+                || method.Segments.Any(segment => segment.AwaitSite is { Arguments: null })))) return false;
+        var projected = SemanticComposableCapabilities.FromProjectedSource(document);
+        var expected = projected.Capabilities;
+        if (objectCancellation)
+            return SemanticObjectAwaitCancellation.HasProjectedSites(document)
+                && manifest.BaseSchemaVersion == projected.BaseSchemaVersion
+                && manifest.BaseSemanticVersion == projected.BaseSemanticVersion
+                && declared.SequenceEqual(expected)
+                && expected.Any(capability => capability.Id == SemanticObjectAwaitCancellation.CapabilityId)
+                && declared.Select(capability => capability.Id).Distinct(StringComparer.Ordinal).Count() == declared.Count;
         if (staticAsyncValue)
         {
             bool named = document.AsyncMethods.Any(method => method.ExceptionPlan?.Catches

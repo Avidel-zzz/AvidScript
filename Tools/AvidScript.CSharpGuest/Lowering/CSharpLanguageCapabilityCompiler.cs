@@ -15,10 +15,12 @@ public static class CSharpLanguageCapabilityCompiler
             or SemanticContract.AsyncCatchVariableSchemaVersion or SemanticContract.CancellationTokenSchemaVersion
             or SemanticComposableCapabilities.SchemaVersion or SemanticContract.AsyncVoidErrorOwnerSchemaVersion
             or SemanticComposableCapabilities.AsyncVoidSchemaVersion or SemanticComposableCapabilities.StaticAsyncValueSchemaVersion
+            or SemanticObjectAwaitCancellation.SchemaVersion
         || source.SemanticVersion is SemanticContract.AsyncSynchronousExceptionSemanticVersion
             or SemanticContract.AsyncCatchVariableSemanticVersion or SemanticContract.CancellationTokenSemanticVersion
             or SemanticComposableCapabilities.SemanticVersion or SemanticContract.AsyncVoidErrorOwnerSemanticVersion
-            or SemanticComposableCapabilities.AsyncVoidSemanticVersion or SemanticComposableCapabilities.StaticAsyncValueSemanticVersion;
+            or SemanticComposableCapabilities.AsyncVoidSemanticVersion or SemanticComposableCapabilities.StaticAsyncValueSemanticVersion
+            or SemanticObjectAwaitCancellation.SemanticVersion;
 
     public static bool TryLower(SemanticDocument source, string semanticSha256,
         out GuestModule? module, out string? error)
@@ -26,6 +28,11 @@ public static class CSharpLanguageCapabilityCompiler
         module = null;
         error = "Unsupported or incomplete language capability source contract.";
         if (!IsRequired(source)) return false;
+        if (SemanticObjectAwaitCancellation.IsVersion(source))
+        {
+            error = "Object await cancellation requires the paired Guest execution contract.";
+            return false;
+        }
         // Static preparation owns field rewriting and attaches private execution
         // contexts before composing the remaining source capabilities.
         if (source.StaticInitialization is not null)

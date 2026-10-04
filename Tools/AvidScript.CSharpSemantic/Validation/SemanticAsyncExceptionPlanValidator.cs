@@ -13,7 +13,11 @@ public static class SemanticAsyncExceptionPlanValidator
     {
         if (document?.AsyncMethods is null || document.Source is null)
             return false;
-        if (!SemanticAsyncCatchVariableValidator.IsValid(document)) return false;
+        if (!SemanticAsyncCatchVariableValidator.IsValid(document)
+            || !SemanticObjectAwaitCancellationValidator.IsValid(document)) return false;
+        bool DirectProducer(SemanticAsyncMethod method, SemanticAsyncAwaitSite? site) =>
+            site is not null && (site.ProducerKind is "delay" or "next_tick"
+                || SemanticObjectAwaitCancellation.IsStatusAwareSite(document, method, site));
         bool enabled = document.SchemaVersion == SemanticContract.AsyncExceptionFlowSchemaVersion
             && document.SemanticVersion == SemanticContract.AsyncExceptionFlowSemanticVersion;
         bool directCleanup = document.SchemaVersion == SemanticContract.DirectAwaitCleanupSchemaVersion
@@ -28,7 +32,7 @@ public static class SemanticAsyncExceptionPlanValidator
             segment?.Transfer?.Kind == SemanticAsyncMethod.RaiseExceptionTransferKind) == true)) return false;
         languageCancellation |= localLifetime && document.AsyncMethods.Any(method => method?.ExceptionPlan?.CancellationTypeId is not null);
         directCleanup |= localLifetime && !languageCancellation && document.AsyncMethods.Any(method => method?.ExceptionPlan is not null
-            && method.Segments.Any(segment => segment?.AwaitSite?.ProducerKind is "delay" or "next_tick"
+            && method.Segments.Any(segment => segment is not null && DirectProducer(method, segment.AwaitSite)
                 && segment.Transfer?.CancellationTarget is >= 0));
         enabled |= directCleanup || languageCancellation || localLifetime;
         if (!enabled)
@@ -50,7 +54,7 @@ public static class SemanticAsyncExceptionPlanValidator
         if (!localLifetime && !document.AsyncMethods.Any(method => method?.ExceptionPlan is not null))
             return false;
         if (directCleanup && !document.AsyncMethods.Any(method => method?.ExceptionPlan is not null
-            && method.Segments.Any(segment => segment?.AwaitSite?.ProducerKind is "delay" or "next_tick"
+            && method.Segments.Any(segment => segment is not null && DirectProducer(method, segment.AwaitSite)
                 && segment.Transfer?.CancellationTarget is >= 0
                 && segment.Transfer.SecondaryTarget == -1))) return false;
         foreach (SemanticAsyncMethod? method in document.AsyncMethods)
@@ -108,8 +112,8 @@ public static class SemanticAsyncExceptionPlanValidator
                 if (region.Kind == "try")
                     hasProtectedAwait |= region.Segments.Any(ordinal =>
                         method.Segments[ordinal].AwaitSite is { ProducerKind: "task_call" or "task_local" }
-                        || (directCleanup || languageCancellation || localLifetime) && method.Segments[ordinal].AwaitSite is
-                            { ProducerKind: "delay" or "next_tick" }
+                        || (directCleanup || languageCancellation || localLifetime)
+                            && DirectProducer(method, method.Segments[ordinal].AwaitSite)
                         || routedThrows && method.Segments[ordinal].Transfer?.Kind
                             == SemanticAsyncMethod.RaiseExceptionTransferKind
                         || synchronousExceptions && method.Segments[ordinal].SynchronousExceptionTarget is not null);
@@ -155,7 +159,7 @@ public static class SemanticAsyncExceptionPlanValidator
                     case SemanticAsyncMethod.AwaitTransferKind:
                         bool taskAwait = segment.AwaitSite?.ProducerKind is "task_call" or "task_local";
                         bool directAwait = (directCleanup || languageCancellation)
-                            && segment.AwaitSite?.ProducerKind is "delay" or "next_tick";
+                            && DirectProducer(method, segment.AwaitSite);
                         bool protectedAwait = plan.Regions.Any(region => region.Kind == "try"
                             && region.Segments.Contains(segment.Ordinal));
                         if (segment.AwaitSite is null || transfer.PrimaryTarget < 0

@@ -130,12 +130,14 @@ public static class SemanticAnalyzer
             SemanticContinuationProjector.Project(context);
         SemanticSupportProjection supportProjection = SemanticSupportPolicy.ProjectDocument(context);
         SemanticOperationProjection operationProjection = SemanticOperationProjector.Project(context, typeRegistry);
+        bool objectAwaitCancellation = enableDirectAwaitCleanup && enableAsyncCancellationFlow
+            && enableAsyncSynchronousExceptions;
         SemanticAsyncProjection asyncProjection = SemanticAsyncProjector.Project(
             context,
             typeRegistry,
             callableProjection.Callables,
             enableAsyncExceptionFlow, enableAsyncSynchronousExceptions,
-            enableAsyncVoidErrorOwner);
+            enableAsyncVoidErrorOwner, objectAwaitCancellation);
         SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(
             context,
             typeRegistry,
@@ -145,7 +147,7 @@ public static class SemanticAnalyzer
             enableAsyncExceptionFlow,
             enableDirectAwaitCleanup,
             enableAsyncCancellationFlow, enableAsyncSynchronousExceptions,
-            enableAsyncVoidErrorOwner);
+            enableAsyncVoidErrorOwner, objectAwaitCancellation);
         asyncProjection = asyncProjection with
         {
             Methods = asyncProjection.Methods.Concat(
@@ -363,6 +365,20 @@ public static class SemanticAnalyzer
         };
         SemanticDocument projected = enableStaticInitialization
             ? SemanticStaticInitializerProjector.Project(context, typeRegistry, document) : document;
+        if (objectAwaitCancellation && SemanticObjectAwaitCancellation.HasProjectedSites(projected))
+        {
+            var objectDocument = projected with {
+                SchemaVersion = SemanticObjectAwaitCancellation.SchemaVersion,
+                SemanticVersion = SemanticObjectAwaitCancellation.SemanticVersion,
+            };
+            var objectManifest = SemanticComposableCapabilities.FromProjectedSource(objectDocument);
+            return objectDocument with {
+                StaticInitialization = projected.StaticInitialization is { } staticPlan ? staticPlan with {
+                    BaseSchemaVersion = objectManifest.BaseSchemaVersion,
+                    BaseSemanticVersion = objectManifest.BaseSemanticVersion } : null,
+                CapabilityManifest = objectManifest,
+            };
+        }
         if (hasVoidErrorOwners && (projected.StaticInitialization is not null || tokenValues))
         {
             var composedManifest = SemanticComposableCapabilities.FromProjectedSource(projected);
