@@ -41,6 +41,34 @@ function Resolve-AvidScriptPreparedSemanticProjectPath {
     return Resolve-AvidScriptBindingPath -RootPath $ProjectRoot -Path $Path
 }
 
+function Resolve-AvidScriptCSharpSourceId {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [string]$SourceId = ""
+    )
+
+    $RootPrefix = (Get-AvidScriptBindingFullPath $ProjectRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    $SourceFullPath = Get-AvidScriptBindingFullPath $SourcePath
+    $DefaultSourceId = if ($SourceFullPath.StartsWith($RootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $SourceFullPath.Substring($RootPrefix.Length).Replace("\", "/")
+    }
+    else { $SourceFullPath }
+    if ([string]::IsNullOrWhiteSpace($SourceId)) { return $DefaultSourceId }
+    # Keep the legacy default for a physically verified input outside the project.
+    # An explicit public build identity is checked before any output is touched.
+    if ($SourceId -ceq $DefaultSourceId) { return $SourceId }
+    Assert-AvidScriptPreparedSemantic `
+        -Condition (-not [System.IO.Path]::IsPathRooted($SourceId) -and
+            -not $SourceId.Contains('\') -and $SourceId.Split('/') -notcontains '..' -and
+            @($SourceId.ToCharArray() | Where-Object { [char]::IsControl($_) }).Count -eq 0) `
+        -Code "ASBI4401" `
+        -Message "SourceId must be a stable forward-slash relative identity without parent traversal."
+    return $SourceId
+}
+
 function Import-AvidScriptPreparedSemanticJson {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -153,7 +181,8 @@ function Import-AvidScriptCSharpPreparedSemantic {
         [AllowNull()][object]$ExpectedAuthorizationPackage,
         [AllowNull()][object]$ExpectedLanguageProfile,
         [Parameter(Mandatory = $true)][string]$FrontendDestinationPath,
-        [Parameter(Mandatory = $true)][string]$SemanticDestinationPath
+        [Parameter(Mandatory = $true)][string]$SemanticDestinationPath,
+        [string]$ExpectedSourceId = ""
     )
 
     $ProjectRootFullPath = Get-AvidScriptBindingFullPath $ProjectRoot
@@ -199,6 +228,17 @@ function Import-AvidScriptCSharpPreparedSemantic {
         -Condition ($ReportSourcePath.Equals($ExpectedSourceFullPath, [System.StringComparison]::OrdinalIgnoreCase)) `
         -Code "ASBI4401" `
         -Message "Prepared semantic report source.file does not match the current source path."
+    $ResolvedSourceId = Resolve-AvidScriptCSharpSourceId `
+        -ProjectRoot $ProjectRootFullPath -SourcePath $ExpectedSourceFullPath -SourceId $ExpectedSourceId
+    $ReportSourceIdProperty = $PreparedReport.source.PSObject.Properties['source_id']
+    $ReportSourceId = if ($null -eq $ReportSourceIdProperty) { $PreparedReport.source.file }
+        else { $ReportSourceIdProperty.Value }
+    Assert-AvidScriptPreparedSemantic `
+        -Condition ($ReportSourceId -is [string] -and
+            -not [string]::IsNullOrWhiteSpace($ReportSourceId) -and
+            $ReportSourceId -ceq $ResolvedSourceId) `
+        -Code "ASBI4401" `
+        -Message "Prepared semantic report source identity does not match the current SourceId."
     $ExpectedSourceSha256 = Get-AvidScriptBindingSha256Hex $ExpectedSourceFullPath
     Assert-AvidScriptPreparedSemantic `
         -Condition ((Test-AvidScriptBindingSha256 ([string]$PreparedReport.source.sha256)) -and
@@ -361,7 +401,8 @@ function Import-AvidScriptCSharpPreparedSemantic {
             [string]$FrontendModel.frontend_version -ceq "1.0" -and
             [bool]$FrontendModel.succeeded -and
             [string]$FrontendModel.source.sha256 -ceq $ExpectedSourceSha256 -and
-            [string]$FrontendModel.source.source_id -ceq [string]$PreparedReport.source.file) `
+            $FrontendModel.source.source_id -is [string] -and
+            $FrontendModel.source.source_id -ceq $ResolvedSourceId) `
         -Code "ASBI4403" `
         -Message "Prepared frontend artifact contract is invalid."
     # The Semantic schema names the Frontend source hash frontend_sha256; it is not the artifact file hash.
@@ -392,7 +433,8 @@ function Import-AvidScriptCSharpPreparedSemantic {
                 @($SemanticModel.diagnostics | Where-Object { [string]$_.severity -ceq 'error' }).Count -eq 0)) -and
             [string]$SemanticModel.source.sha256 -ceq $ExpectedSourceSha256 -and
             [string]$SemanticModel.source.frontend_sha256 -ceq $ExpectedSourceSha256 -and
-            [string]$SemanticModel.source.source_id -ceq [string]$PreparedReport.source.file) `
+            $SemanticModel.source.source_id -is [string] -and
+            $SemanticModel.source.source_id -ceq $ResolvedSourceId) `
         -Code "ASBI4403" `
         -Message "Prepared semantic artifact contract is invalid."
 

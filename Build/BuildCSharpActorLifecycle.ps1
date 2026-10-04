@@ -904,6 +904,7 @@ function Write-BuildReport {
         source = [ordered]@{
             project = Convert-ToProjectRelativePath $ProjectPath
             file = Convert-ToProjectRelativePath $SourcePath
+            source_id = $SourceId
             sha256 = if ($null -eq $FrontendModel) { "" } else { [string]$FrontendModel.source.sha256 }
             script_type = $SelectedScriptTypeName
         }
@@ -1458,6 +1459,7 @@ if ([string]::IsNullOrWhiteSpace($PreparedBuildReportPath) -and -not $DisableSem
             -CacheRoot $SemanticCacheRoot `
             -Configuration $Configuration `
             -SourcePath $SourcePath `
+            -SourceId $SourceId `
             -ProjectPath $ProjectPath `
             -AuthorizationPackage $BindingAuthorizationInfo `
             -LanguageProfile $ResolvedLanguageProfile
@@ -1467,6 +1469,7 @@ if ([string]::IsNullOrWhiteSpace($PreparedBuildReportPath) -and -not $DisableSem
             -Context $SemanticCacheContext `
             -ProjectRoot $ProjectRoot `
             -ExpectedSourcePath $SourcePath `
+            -ExpectedSourceId $SourceId `
             -ExpectedAuthorizationPackage $BindingAuthorizationInfo `
             -FrontendDestinationPath $FrontendArtifactPath `
             -SemanticDestinationPath $SemanticArtifactPath
@@ -1526,6 +1529,7 @@ if (-not [string]::IsNullOrWhiteSpace($PreparedBuildReportPath)) {
             -PreparedReportPath $PreparedBuildReportPath `
             -ProjectRoot $ProjectRoot `
             -ExpectedSourcePath $SourcePath `
+            -ExpectedSourceId $SourceId `
             -ExpectedAuthorizationPackage $BindingAuthorizationInfo `
             -ExpectedLanguageProfile $ResolvedLanguageProfile `
             -FrontendDestinationPath $FrontendArtifactPath `
@@ -2798,6 +2802,7 @@ try {
                 -Context $SemanticCacheContext `
                 -ProjectRoot $ProjectRoot `
                 -ExpectedSourcePath $SourcePath `
+                -ExpectedSourceId $SourceId `
                 -ExpectedAuthorizationPackage $BindingAuthorizationInfo `
                 -SourceReportPath $ReportPath
             $SemanticCache.entry_report_file = Convert-ToProjectRelativePath $CachePublication.EntryReportPath

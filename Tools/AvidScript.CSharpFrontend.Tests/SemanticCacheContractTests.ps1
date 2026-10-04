@@ -48,13 +48,31 @@ function Assert-CacheContextFailure {
         "$Message expected=$ExpectedCode actual=$ObservedCode"
 }
 
-if (Test-Path -LiteralPath $RunRoot) {
-    Remove-Item -LiteralPath $RunRoot -Recurse -Force
+function Write-SemanticCacheToolchainOwners {
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    foreach ($Name in @('AvidScriptCSharpCompilerWorker', 'AvidScriptCSharpPreparedSemantic',
+        'AvidScriptCSharpSemanticCache', 'BuildCSharpActorLifecycle')) {
+        Write-Utf8File -Path (Join-Path $Root "Build/$Name.ps1") -Text "# $Name fixture"
+    }
+    Write-Utf8File -Path (Join-Path $Root 'Tools/AvidScript.CSharpCompilerWorker/Worker.cs') -Text 'namespace Worker; public static class Compiler {}'
+    Write-Utf8File -Path (Join-Path $Root 'Tools/AvidScript.CSharpCompilerWorker/Worker.csproj') -Text '<Project Sdk="Microsoft.NET.Sdk" />'
+}
+
+foreach ($Directory in @($RunRoot, $ProjectCacheRunRoot)) {
+    $FullPath = [IO.Path]::GetFullPath($Directory)
+    $WorkspacePrefix = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    Assert-Condition ($FullPath.StartsWith($WorkspacePrefix, [StringComparison]::OrdinalIgnoreCase) -and
+        (Split-Path -Leaf $FullPath) -ceq 'SemanticCacheContracts') 'unexpected test cleanup target'
+    if (Test-Path -LiteralPath $FullPath) {
+        Assert-Condition (-not ((Get-Item -LiteralPath $FullPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) 'test cleanup root is a reparse point'
+        Assert-Condition (@(Get-ChildItem -LiteralPath $FullPath -Directory -Recurse -Force | Where-Object {
+            $_.Attributes -band [IO.FileAttributes]::ReparsePoint
+        }).Count -eq 0) 'test cleanup root contains a reparse point'
+        Remove-Item -LiteralPath $FullPath -Recurse -Force
+    }
 }
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
-if (Test-Path -LiteralPath $ProjectCacheRunRoot) {
-    Remove-Item -LiteralPath $ProjectCacheRunRoot -Recurse -Force
-}
 Assert-Condition (Test-Path -LiteralPath $HelperPath -PathType Leaf) `
     "semantic cache helper is missing: $HelperPath"
 . $HelperPath
@@ -78,6 +96,7 @@ Write-Utf8File -Path $ReferenceSourcePath -Text "namespace AvidScript.Bindings; 
 Write-Utf8File -Path $GlobalJsonPath -Text '{"sdk":{"version":"8.0.416","rollForward":"disable","allowPrerelease":false}}'
 Write-Utf8File -Path (Join-Path $ToolchainRoot "Build\InvokeCSharpFrontend.ps1") -Text 'Write-Output "frontend"'
 Write-Utf8File -Path (Join-Path $ToolchainRoot "Build\InvokeCSharpSemantic.ps1") -Text 'Write-Output "semantic"'
+Write-SemanticCacheToolchainOwners -Root $ToolchainRoot
 Write-Utf8File -Path $FrontendToolPath -Text "namespace Frontend; public static class Analyzer {}"
 Write-Utf8File -Path (Join-Path $ToolchainRoot "Tools\AvidScript.CSharpFrontend\Frontend.csproj") -Text '<Project Sdk="Microsoft.NET.Sdk" />'
 Write-Utf8File -Path $SemanticToolPath -Text "namespace Semantic; public static class Analyzer {}"
@@ -110,6 +129,34 @@ Assert-Condition ($First.Enabled -and $First.CacheKey -ceq $Second.CacheKey) `
     "identical semantic inputs did not produce the same cache key"
 Assert-Condition ($First.CacheKey -match '^[0-9a-f]{64}$') "cache key is not lowercase SHA-256"
 Assert-Condition ($First.ToolchainFingerprint -match '^[0-9a-f]{64}$') "toolchain fingerprint is not lowercase SHA-256"
+
+$ExplicitSourceArguments = $ContextArguments.Clone()
+$ExplicitSourceArguments.SourceId = Resolve-AvidScriptCSharpSourceId -ProjectRoot $ProjectRoot -SourcePath $SourcePath
+$ExplicitSource = Get-AvidScriptCSharpSemanticCacheContext @ExplicitSourceArguments
+Assert-Condition ($ExplicitSource.CacheKey -ceq $First.CacheKey) 'explicit default identity changed the cache key'
+$LogicalArguments = $ContextArguments.Clone()
+$LogicalArguments.SourceId = 'Scripts/CacheContract.cs'
+$Logical = Get-AvidScriptCSharpSemanticCacheContext @LogicalArguments
+Assert-Condition ($Logical.CacheKey -cne $First.CacheKey -and
+    $Logical.CanonicalInput.source.id -ceq $First.CanonicalInput.source.id -and
+    $Logical.CanonicalInput.source.sha256 -ceq $First.CanonicalInput.source.sha256) 'logical identity did not independently invalidate the cache key'
+$LogicalCaseArguments = $LogicalArguments.Clone()
+$LogicalCaseArguments.SourceId = $LogicalArguments.SourceId.ToUpperInvariant()
+$LogicalCase = Get-AvidScriptCSharpSemanticCacheContext @LogicalCaseArguments
+Assert-Condition ($LogicalCase.CacheKey -cne $Logical.CacheKey) 'logical source identity was folded to lowercase'
+$InvalidIdentityArguments = $ContextArguments.Clone()
+$InvalidIdentityArguments.SourceId = '../invalid.cs'
+Assert-CacheContextFailure -Arguments $InvalidIdentityArguments -ExpectedCode 'ASBI4501' -Message 'parent traversal identity was accepted'
+foreach ($Name in @('AvidScriptCSharpCompilerWorker', 'AvidScriptCSharpPreparedSemantic',
+    'AvidScriptCSharpSemanticCache', 'BuildCSharpActorLifecycle')) {
+    $OwnerPath = Join-Path $ToolchainRoot "Build/$Name.ps1"
+    $OriginalText = [IO.File]::ReadAllText($OwnerPath)
+    Write-Utf8File -Path $OwnerPath -Text ($OriginalText + "`n# revised admission")
+    $ChangedOwner = Get-AvidScriptCSharpSemanticCacheContext @ContextArguments
+    Assert-Condition ($ChangedOwner.CacheKey -cne $First.CacheKey -and
+        $ChangedOwner.ToolchainFingerprint -cne $First.ToolchainFingerprint) "$Name did not invalidate toolchain identity"
+    Write-Utf8File -Path $OwnerPath -Text $OriginalText
+}
 
 $AlternateRootArguments = $ContextArguments.Clone()
 $AlternateRootArguments.CacheRoot = $AlternateCacheRoot
@@ -231,6 +278,7 @@ $LinkedFrontendRoot = Join-Path $EscapedToolchainRoot "Tools\AvidScript.CSharpFr
 Write-Utf8File -Path (Join-Path $EscapedToolchainRoot "global.json") -Text '{"sdk":{"version":"8.0.416","rollForward":"disable","allowPrerelease":false}}'
 Write-Utf8File -Path (Join-Path $EscapedToolchainRoot "Build\InvokeCSharpFrontend.ps1") -Text 'Write-Output "frontend"'
 Write-Utf8File -Path (Join-Path $EscapedToolchainRoot "Build\InvokeCSharpSemantic.ps1") -Text 'Write-Output "semantic"'
+Write-SemanticCacheToolchainOwners -Root $EscapedToolchainRoot
 Write-Utf8File -Path (Join-Path $EscapedToolchainRoot "Tools\AvidScript.CSharpSemantic\Semantic.cs") -Text "namespace Semantic; public static class Analyzer {}"
 Write-Utf8File -Path (Join-Path $EscapedToolchainRoot "Tools\AvidScript.CSharpSemantic\Semantic.csproj") -Text '<Project Sdk="Microsoft.NET.Sdk" />'
 Write-Utf8File -Path (Join-Path $ExternalFrontendRoot "Frontend.cs") -Text "namespace External; public static class Escaped {}"
@@ -257,5 +305,5 @@ Assert-Condition ($ChangedToolchain.ToolchainFingerprint -cne $First.ToolchainFi
     "toolchain source did not invalidate toolchain fingerprint"
 Assert-Condition ($ChangedToolchain.CacheKey -cne $First.CacheKey) "toolchain source did not invalidate cache key"
 
-Write-Output "AvidScript.CSharpFrontend.SemanticCacheContracts: 16/16 passed"
+Write-Output "AvidScript.CSharpFrontend.SemanticCacheContracts: 21/21 passed"
 exit 0

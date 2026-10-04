@@ -74,7 +74,10 @@ function Get-AvidScriptSemanticCacheToolchainFiles {
         (Join-Path $PluginRootFullPath "global.json"),
         (Join-Path $PluginRootFullPath "Build\InvokeCSharpFrontend.ps1"),
         (Join-Path $PluginRootFullPath "Build\InvokeCSharpSemantic.ps1"),
-        (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpCompilerWorker.ps1"))
+        (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpCompilerWorker.ps1"),
+        (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpPreparedSemantic.ps1"),
+        (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpSemanticCache.ps1"),
+        (Join-Path $PluginRootFullPath "Build\BuildCSharpActorLifecycle.ps1"))
     foreach ($RequiredFile in $RequiredFiles) {
         Assert-AvidScriptCSharpSemanticCache `
             -Condition (Test-Path -LiteralPath $RequiredFile -PathType Leaf) `
@@ -227,7 +230,8 @@ function Get-AvidScriptCSharpSemanticCacheContext {
         [Parameter(Mandatory = $true)][string]$SourcePath,
         [Parameter(Mandatory = $true)][string]$ProjectPath,
         [AllowNull()][object]$AuthorizationPackage,
-        [AllowNull()][object]$LanguageProfile
+        [AllowNull()][object]$LanguageProfile,
+        [string]$SourceId = ""
     )
 
     $PluginRootFullPath = Get-AvidScriptBindingFullPath $PluginRoot
@@ -235,6 +239,11 @@ function Get-AvidScriptCSharpSemanticCacheContext {
     $CacheRootFullPath = Get-AvidScriptBindingFullPath $CacheRoot
     $SourceFullPath = Get-AvidScriptBindingFullPath $SourcePath
     $ProjectFullPath = Get-AvidScriptBindingFullPath $ProjectPath
+    try {
+        $ResolvedSourceId = Resolve-AvidScriptCSharpSourceId `
+            -ProjectRoot $ProjectRootFullPath -SourcePath $SourceFullPath -SourceId $SourceId
+    }
+    catch { Fail-AvidScriptCSharpSemanticCache -Code "ASBI4501" -Message $_.Exception.Message }
     foreach ($RequiredInput in @($SourceFullPath, $ProjectFullPath)) {
         Assert-AvidScriptCSharpSemanticCache `
             -Condition (Test-Path -LiteralPath $RequiredInput -PathType Leaf) `
@@ -274,6 +283,7 @@ function Get-AvidScriptCSharpSemanticCacheContext {
                 -ProjectRoot $ProjectRootFullPath `
                 -Path $SourceFullPath `
                 -FieldName "source"
+            source_id = $ResolvedSourceId
             sha256 = Get-AvidScriptBindingSha256Hex $SourceFullPath
         }
         project_sha256 = Get-AvidScriptBindingSha256Hex $ProjectFullPath
@@ -295,6 +305,7 @@ function Get-AvidScriptCSharpSemanticCacheContext {
         ProjectRoot = $ProjectRootFullPath
         Configuration = $Configuration
         SourcePath = $SourceFullPath
+        SourceId = $ResolvedSourceId
         ProjectPath = $ProjectFullPath
         DotNetSdkVersion = [string]$Toolchain.DotNetSdkVersion
         CacheRoot = $CacheRootFullPath
@@ -584,6 +595,30 @@ function Get-AvidScriptSemanticCacheMappedCode {
     return "ASBI4502"
 }
 
+function Assert-AvidScriptSemanticCacheSourceIdentity {
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [Parameter(Mandatory = $true)][string]$ExpectedSourcePath,
+        [string]$ExpectedSourceId = ""
+    )
+
+    try {
+        $ResolvedSourceId = Resolve-AvidScriptCSharpSourceId `
+            -ProjectRoot $ProjectRoot -SourcePath $ExpectedSourcePath -SourceId $ExpectedSourceId
+    }
+    catch { Fail-AvidScriptCSharpSemanticCache -Code "ASBI4502" -Message $_.Exception.Message }
+    Assert-AvidScriptCSharpSemanticCache `
+        -Condition ((Get-AvidScriptBindingFullPath ([string]$Context.SourcePath)).Equals(
+                (Get-AvidScriptBindingFullPath $ExpectedSourcePath), [System.StringComparison]::OrdinalIgnoreCase) -and
+            $Context.SourceId -is [string] -and $Context.SourceId -ceq $ResolvedSourceId -and
+            $Context.CanonicalInput.source.source_id -is [string] -and
+            $Context.CanonicalInput.source.source_id -ceq $ResolvedSourceId -and
+            (Get-AvidScriptUtf8JsonSha256 $Context.CanonicalInput) -ceq [string]$Context.CacheKey) `
+        -Code "ASBI4502" `
+        -Message "Semantic cache context source identity differs from the active build."
+}
+
 function Import-AvidScriptCSharpSemanticCacheEntry {
     param(
         [Parameter(Mandatory = $true)]$Context,
@@ -592,7 +627,8 @@ function Import-AvidScriptCSharpSemanticCacheEntry {
         [AllowNull()][object]$ExpectedAuthorizationPackage,
         [Parameter(Mandatory = $true)][string]$FrontendDestinationPath,
         [Parameter(Mandatory = $true)][string]$SemanticDestinationPath,
-        [AllowNull()][object]$CacheLock
+        [AllowNull()][object]$CacheLock,
+        [string]$ExpectedSourceId = ""
     )
 
     $CanIsolate = $false
@@ -600,6 +636,8 @@ function Import-AvidScriptCSharpSemanticCacheEntry {
     $CorruptEntryPath = ""
     try {
         Assert-AvidScriptSemanticCacheContext -Context $Context -ProjectRoot $ProjectRoot
+        Assert-AvidScriptSemanticCacheSourceIdentity -Context $Context -ProjectRoot $ProjectRoot `
+            -ExpectedSourcePath $ExpectedSourcePath -ExpectedSourceId $ExpectedSourceId
         Assert-AvidScriptSemanticCacheDestinations `
             -CacheRoot ([string]$Context.CacheRoot) `
             -FrontendDestinationPath $FrontendDestinationPath `
@@ -674,6 +712,7 @@ function Import-AvidScriptCSharpSemanticCacheEntry {
             -PreparedReportPath $EntryReportPath `
             -ProjectRoot $ProjectRoot `
             -ExpectedSourcePath $ExpectedSourcePath `
+            -ExpectedSourceId $ExpectedSourceId `
             -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
             -ExpectedLanguageProfile $Context.LanguageProfile `
             -FrontendDestinationPath $FrontendDestinationPath `
@@ -733,10 +772,13 @@ function Assert-AvidScriptSemanticCachePublicationContext {
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
         [Parameter(Mandatory = $true)][string]$ExpectedSourcePath,
         [AllowNull()][object]$ExpectedAuthorizationPackage,
-        [Parameter(Mandatory = $true)][string]$SourceReportPath
+        [Parameter(Mandatory = $true)][string]$SourceReportPath,
+        [string]$ExpectedSourceId = ""
     )
 
     Assert-AvidScriptSemanticCacheContext -Context $Context -ProjectRoot $ProjectRoot
+    Assert-AvidScriptSemanticCacheSourceIdentity -Context $Context -ProjectRoot $ProjectRoot `
+        -ExpectedSourcePath $ExpectedSourcePath -ExpectedSourceId $ExpectedSourceId
     foreach ($RequiredProperty in @(
         "PluginRoot",
         "ProjectRoot",
@@ -784,6 +826,7 @@ function Assert-AvidScriptSemanticCachePublicationContext {
         -CacheRoot ([string]$Context.CacheRoot) `
         -Configuration ([string]$Context.Configuration) `
         -SourcePath $ExpectedSourceFullPath `
+        -SourceId $ExpectedSourceId `
         -ProjectPath $ContextProjectPath `
         -AuthorizationPackage $ExpectedAuthorizationPackage `
         -LanguageProfile $Context.LanguageProfile
@@ -812,7 +855,8 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
         [Parameter(Mandatory = $true)][string]$ExpectedSourcePath,
         [AllowNull()][object]$ExpectedAuthorizationPackage,
-        [Parameter(Mandatory = $true)][string]$SourceReportPath
+        [Parameter(Mandatory = $true)][string]$SourceReportPath,
+        [string]$ExpectedSourceId = ""
     )
 
     $PublicationResult = $null
@@ -836,6 +880,7 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
             -Context $Context `
             -ProjectRoot $ProjectRoot `
             -ExpectedSourcePath $ExpectedSourcePath `
+            -ExpectedSourceId $ExpectedSourceId `
             -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
             -SourceReportPath $SourceReportPath
         $SourceReportSha256 = Get-AvidScriptBindingSha256Hex $SourceReportPath
@@ -849,6 +894,7 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
                 -PreparedReportPath $SourceReportPath `
                 -ProjectRoot $ProjectRoot `
                 -ExpectedSourcePath $ExpectedSourcePath `
+                -ExpectedSourceId $ExpectedSourceId `
                 -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
                 -ExpectedLanguageProfile $Context.LanguageProfile `
                 -FrontendDestinationPath $ValidationFrontendPath `
@@ -864,6 +910,7 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
             -Context $Context `
             -ProjectRoot $ProjectRoot `
             -ExpectedSourcePath $ExpectedSourcePath `
+            -ExpectedSourceId $ExpectedSourceId `
             -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
             -SourceReportPath $SourceReportPath
         Assert-AvidScriptCSharpSemanticCache `
@@ -877,6 +924,7 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
                 -Context $Context `
                 -ProjectRoot $ProjectRoot `
                 -ExpectedSourcePath $ExpectedSourcePath `
+                -ExpectedSourceId $ExpectedSourceId `
                 -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
                 -FrontendDestinationPath (Join-Path $ValidationDirectory "winner.frontend.json") `
                 -SemanticDestinationPath (Join-Path $ValidationDirectory "winner.semantic.json") `
@@ -1010,6 +1058,7 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
             -PreparedReportPath $StagingValidationReportPath `
             -ProjectRoot $ProjectRoot `
             -ExpectedSourcePath $ExpectedSourcePath `
+            -ExpectedSourceId $ExpectedSourceId `
             -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
             -ExpectedLanguageProfile $Context.LanguageProfile `
             -FrontendDestinationPath (Join-Path $ValidationDirectory "staging.frontend.json") `
@@ -1035,6 +1084,7 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
             -Context $Context `
             -ProjectRoot $ProjectRoot `
             -ExpectedSourcePath $ExpectedSourcePath `
+            -ExpectedSourceId $ExpectedSourceId `
             -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
             -FrontendDestinationPath (Join-Path $ValidationDirectory "published.frontend.json") `
             -SemanticDestinationPath (Join-Path $ValidationDirectory "published.semantic.json") `

@@ -93,9 +93,21 @@ function Assert-RejectedImport {
 }
 
 foreach ($Directory in @($RunRoot, (Split-Path -Parent $CacheRoot))) {
-    if (Test-Path -LiteralPath $Directory) {
-        Remove-Item -LiteralPath $Directory -Recurse -Force
+    $FullPath = [IO.Path]::GetFullPath($Directory)
+    $WorkspacePrefix = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    Assert-Condition ($FullPath.StartsWith($WorkspacePrefix, [StringComparison]::OrdinalIgnoreCase) -and
+        (Split-Path -Leaf $FullPath) -ceq 'SemanticCacheEntryContracts') 'unexpected test cleanup target'
+    if (Test-Path -LiteralPath $FullPath) {
+        Assert-Condition (-not ((Get-Item -LiteralPath $FullPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) 'test cleanup root is a reparse point'
+        Assert-Condition (@(Get-ChildItem -LiteralPath $FullPath -Directory -Recurse -Force | Where-Object {
+            $_.Attributes -band [IO.FileAttributes]::ReparsePoint
+        }).Count -eq 0) 'test cleanup root contains a reparse point'
+        Remove-Item -LiteralPath $FullPath -Recurse -Force
     }
+}
+$PriorTransactions = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+if (Test-Path -LiteralPath $TransactionRoot -PathType Container) {
+    foreach ($Directory in @(Get-ChildItem -LiteralPath $TransactionRoot -Directory -Force)) { [void]$PriorTransactions.Add($Directory.FullName) }
 }
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 . $CacheHelperPath
@@ -144,8 +156,8 @@ $FrontendModel = [ordered]@{
 }
 Write-JsonFile -Path $SeedFrontendPath -Value $FrontendModel
 $SemanticModel = [ordered]@{
-    schema_version = 22
-    semantic_version = "1.26"
+    schema_version = 31
+    semantic_version = "1.40"
     succeeded = $true
     source = [ordered]@{
         source_id = $SourceId
@@ -193,8 +205,8 @@ $SeedReport = [ordered]@{
         artifact_sha256 = Get-AvidScriptBindingSha256Hex $SeedFrontendPath
     }
     semantic = [ordered]@{
-        schema_version = 22
-        version = "1.26"
+        schema_version = 31
+        version = "1.40"
         succeeded = $true
         source_sha256 = $SourceSha256
         frontend_sha256 = $SourceSha256
@@ -434,8 +446,8 @@ Assert-Condition ((Get-AvidScriptBindingSha256Hex $HitFrontendPath) -ceq (Get-Av
 Assert-Condition ((Get-AvidScriptBindingSha256Hex $HitSemanticPath) -ceq (Get-AvidScriptBindingSha256Hex $SeedSemanticPath)) `
     "cache hit semantic bytes differ"
 
-$ExternalOutputParent = Join-Path ([System.IO.Path]::GetPathRoot($ProjectRoot)) "tmp"
-$ExternalOutputRoot = Join-Path $ExternalOutputParent "AvidScriptSemanticCacheEntryContracts.$PID"
+$ExternalOutputParent = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AvidScript/Verification/SemanticCacheEntryContracts'
+$ExternalOutputRoot = Join-Path $ExternalOutputParent "$PID.$([Guid]::NewGuid().ToString('N'))"
 $ExternalOutputFullPath = [System.IO.Path]::GetFullPath($ExternalOutputRoot)
 Assert-Condition (-not $ExternalOutputFullPath.StartsWith(
         ([System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd("\") + "\"),
@@ -474,6 +486,9 @@ if ($ExternalOutputWritable) {
     }
     finally {
         if (Test-Path -LiteralPath $ExternalOutputFullPath) {
+            Assert-Condition ($ExternalOutputFullPath.StartsWith(
+                ([IO.Path]::GetFullPath($ExternalOutputParent).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar),
+                [StringComparison]::OrdinalIgnoreCase)) 'external test cleanup target escaped its namespace'
             Remove-Item -LiteralPath $ExternalOutputFullPath -Recurse -Force
         }
     }
@@ -757,11 +772,13 @@ $TransientDirectories = @()
 foreach ($TransientRoot in $TransientRoots) {
     if (Test-Path -LiteralPath $TransientRoot -PathType Container) {
         $TransientDirectories += @(Get-ChildItem -LiteralPath $TransientRoot -Directory -Recurse -Force | Where-Object {
-            $_.Name -match '^\.(?:validation|staging)\.'
+            $_.Name -match "^\.(?:validation|staging)\.$PID\." -and -not $PriorTransactions.Contains($_.FullName)
         })
     }
 }
 foreach ($TransientDirectory in $TransientDirectories) {
+    Assert-Condition ((Test-AvidScriptBindingPathContained -RootPath $CacheRoot -CandidatePath $TransientDirectory.FullName) -or
+        (Test-AvidScriptBindingPathContained -RootPath $TransactionRoot -CandidatePath $TransientDirectory.FullName)) 'transaction cleanup target escaped its namespace'
     Microsoft.PowerShell.Management\Remove-Item -LiteralPath $TransientDirectory.FullName -Recurse -Force
 }
 
@@ -769,7 +786,7 @@ $TransientCachePaths = @()
 foreach ($TransientRoot in $TransientRoots) {
     if (Test-Path -LiteralPath $TransientRoot -PathType Container) {
         $TransientCachePaths += @(Get-ChildItem -LiteralPath $TransientRoot -Recurse -Force | Where-Object {
-            $_.Name -match '^\.(?:validation|staging)\.'
+            $_.Name -match "^\.(?:validation|staging)\.$PID\." -and -not $PriorTransactions.Contains($_.FullName)
         })
     }
 }
