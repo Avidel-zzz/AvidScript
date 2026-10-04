@@ -84,6 +84,10 @@ struct FAvidScriptFrontendReport
 	FString GuestIrSha256;
 	FString Bindings;
 	FString OutputRoot;
+	bool bHasLanguageProfile = false;
+	bool bLanguageProfileValid = false;
+	FString LanguageProfile;
+	FString LanguageProfileContractSha256;
 	FAvidScriptFrontendBindingPackage BindingPackage;
 	bool bHasToolInvocations = false;
 	bool bToolInvocationsValid = false;

@@ -94,9 +94,9 @@ $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = '0'
 ## 当前限制
 
 - 支持的是已实现的 C# / .NET 子集，不能直接运行任意 NuGet 包。`Task<T>` 目前只覆盖 `Task<int>`，`catch` 和 `finally` 中不能 `await`。
-- 方法体热重载已有自动化覆盖；脚本定义类型的反射签名变化仍需重新编译并重启 Editor。标准 `CancellationToken` 的组合用法尚未进入默认 Build And Bind。
-- 对象加载的[取消恢复](Docs/Phase66/P66.C18_Object_Load_Cancellation_Contract.md)支持静态状态、标准 token 和 `catch/finally` 组合；使用生成的绑定声明构建后，Wasmtime / WAMR 的 48 项运行测试已通过，覆盖取消重抛、GC 和执行域退出。仍需通过 `-LanguageProfile gameplay-v1` 构建。
-- `async void` 异常报告、Session 候选回滚和[静态 / token 组合](Docs/Phase66/P66.C12_Async_Void_Composition_Contract.md)已有 Win64 双 VM 测试；[普通 Task 的静态状态 / catch / token 组合](Docs/Phase66/P66.C14_Static_Catch_Composition_Contract.md)也已覆盖。[Gameplay 配置](Docs/Phase66/P66.C16_Gameplay_Profile_Build_Contract.md)可通过 `-LanguageProfile gameplay-v1` 用于构建，支持缓存与 prepared 重用；新生成的绑定包支持[标准 CancellationToken](Docs/Phase66/P66.C17_Generated_Cancellation_Token_Contract.md)。Editor 默认接入、共享类型域回滚与 Actor/World teardown 仍在推进。
+- 方法体热重载已有自动化覆盖；脚本定义类型的反射签名变化仍需重新编译并重启 Editor。[新建工作区](Docs/Phase66/P66.C19_Editor_Gameplay_Profile_Contract.md)默认启用 `gameplay-v1`，支持标准 `CancellationToken` 的组合用法；已有配置沿用原合同。
+- 对象加载的[取消恢复](Docs/Phase66/P66.C18_Object_Load_Cancellation_Contract.md)支持静态状态、标准 token 和 `catch/finally` 组合；使用生成的绑定声明构建后，Wasmtime / WAMR 的 48 项运行测试已通过，覆盖取消重抛、GC 和执行域退出。命令行使用 `-LanguageProfile gameplay-v1`；新建 Editor 工作区已默认选择该配置。
+- `async void` 异常报告、Session 候选回滚和[静态 / token 组合](Docs/Phase66/P66.C12_Async_Void_Composition_Contract.md)已有 Win64 双 VM 测试；[普通 Task 的静态状态 / catch / token 组合](Docs/Phase66/P66.C14_Static_Catch_Composition_Contract.md)也已覆盖。[Gameplay 配置](Docs/Phase66/P66.C16_Gameplay_Profile_Build_Contract.md)支持缓存与 prepared 重用；新生成的绑定包支持[标准 CancellationToken](Docs/Phase66/P66.C17_Generated_Cancellation_Token_Contract.md)。Editor 的构建、绑定、异步重载与编译失败保留旧实例已有自动化验证；共享类型域的语言错误回滚和真实 Editor Play 仍待完成。
 - 网络路径有自动化测试，真实多人游戏尚未验收；Shipping、Android 和 iOS 也尚未验收。
 
 语言边界见 [P66.C 执行计划](Docs/Phase66/P66.C_Language_Execution_Plan.md)和[异步能力合同](Docs/Architecture/AvidScript_Composable_Capability_Contract.md)。

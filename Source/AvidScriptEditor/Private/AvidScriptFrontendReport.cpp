@@ -392,6 +392,26 @@ void LoadAvidScriptToolInvocationMetadata(
 			ToolInvocationsObject, TEXT("wasm_backend"), OutReport.WasmBackendInvocationCount);
 }
 
+void LoadAvidScriptLanguageProfileMetadata(
+	const TSharedPtr<FJsonObject>& RootObject,
+	FAvidScriptFrontendReport& OutReport)
+{
+	const TSharedPtr<FJsonValue>* Value = RootObject->Values.Find(TEXT("language_profile"));
+	if (Value == nullptr) return;
+	OutReport.bHasLanguageProfile = true;
+	if (!Value->IsValid() || (*Value)->Type != EJson::Object) return;
+	const TSharedPtr<FJsonObject> Object = (*Value)->AsObject();
+	if (!TryGetAvidScriptJsonStringField(Object, TEXT("name"), OutReport.LanguageProfile)
+		|| !TryGetAvidScriptJsonStringField(Object, TEXT("contract_sha256"), OutReport.LanguageProfileContractSha256)
+		|| OutReport.LanguageProfile.IsEmpty() || OutReport.LanguageProfile.Len() > 128
+		|| OutReport.LanguageProfile != OutReport.LanguageProfile.TrimStartAndEnd()
+		|| OutReport.LanguageProfileContractSha256.Len() != 64) return;
+	for (const TCHAR Character : OutReport.LanguageProfileContractSha256)
+		if (!FChar::IsHexDigit(Character)) return;
+	OutReport.LanguageProfileContractSha256.ToLowerInline();
+	OutReport.bLanguageProfileValid = true;
+}
+
 void LoadAvidScriptSemanticCacheMetadata(
 	const TSharedPtr<FJsonObject>& RootObject,
 	FAvidScriptFrontendReport& OutReport)
@@ -615,6 +635,7 @@ bool FAvidScriptFrontendReportReader::LoadFromFile(
 	LoadAvidScriptGuestIrMetadata(RootObject, OutReport);
 	LoadAvidScriptBindingPackageMetadata(RootObject, OutReport);
 	LoadAvidScriptToolInvocationMetadata(RootObject, OutReport);
+	LoadAvidScriptLanguageProfileMetadata(RootObject, OutReport);
 	LoadAvidScriptSemanticCacheMetadata(RootObject, OutReport);
 	LoadAvidScriptCompilationCacheMetadata(RootObject, OutReport);
 	RootObject->TryGetStringField(TEXT("bindings"), OutReport.Bindings);

@@ -31,6 +31,9 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString ModuleId;
 	FString ArtifactStem;
 	FString Configuration = TEXT("Release");
+	// Empty preserves the legacy language contract. New workspace profiles
+	// explicitly select the compiler-owned gameplay-v1 contract.
+	FString LanguageProfile;
 	FString VmArtifactTargetTriple = TEXT("x86_64-pc-windows-msvc");
 	EAvidScriptEditorVmArtifactPolicy VmArtifactPolicy =
 		EAvidScriptEditorVmArtifactPolicy::PreferPrecompiled;
@@ -72,6 +75,8 @@ struct FAvidScriptEditorCSharpBuildResult
 	FString BindingPackagePath;
 	FString ModuleId;
 	FString ArtifactStem;
+	FString LanguageProfile;
+	FString LanguageProfileContractSha256;
 	int32 BuildInvocationCount = 0;
 	int32 FrontendInvocationCount = 0;
 	int32 SemanticInvocationCount = 0;

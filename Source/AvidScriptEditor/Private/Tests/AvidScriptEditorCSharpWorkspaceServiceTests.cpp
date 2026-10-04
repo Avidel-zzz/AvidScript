@@ -159,6 +159,8 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
         TEXT("Workspace profile loads through ProfileService"),
         FAvidScriptEditorCSharpProfileService::LoadProfile(First.ProfilePath, ProfileResult));
     TestEqual(TEXT("Profile source is project-owned source"), ProfileResult.BuildConfig.SourcePath, First.SourcePath);
+    TestEqual(TEXT("Workspace profile explicitly selects the gameplay contract"), ProfileResult.BuildConfig.LanguageProfile, FString(TEXT("gameplay-v1")));
+    TestEqual(TEXT("Workspace profile uses the language selection schema"), ProfileResult.SchemaVersion, 11);
     TestEqual(TEXT("Profile project is project-owned project"), ProfileResult.BuildConfig.ProjectPath, First.ProjectPath);
     TestEqual(TEXT("Profile output is Saved-owned output"), ProfileResult.BuildConfig.OutputRoot, First.OutputRoot);
     TestEqual(TEXT("Profile report is deterministic"), ProfileResult.BuildConfig.ReportPath, First.ReportPath);

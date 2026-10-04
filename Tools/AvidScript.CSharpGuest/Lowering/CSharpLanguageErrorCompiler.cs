@@ -313,10 +313,18 @@ public static class CSharpLanguageErrorCompiler
             .Where(export => affected.Contains(export.FunctionId)).ToArray();
         Dictionary<string, GuestFunction> originalFunctions = lowered.Module.Functions
             .ToDictionary(function => function.Id, StringComparer.Ordinal);
+        // Compiler-generated Host routers are not Semantic callers. Keep them
+        // outside the source effect rewrite, then restore their
+        // typed calls through private outcome adapters before final validation.
+        GuestFunction[] generatedRouters = lowered.Module.Functions.Where(function =>
+            CSharpGeneratedLanguageErrorAdapter.RequiresAdapter(function, affected)).ToArray();
+        var generatedRouterIds = generatedRouters.Select(function => function.Id).ToHashSet(StringComparer.Ordinal);
+        GuestExport[] generatedExports = lowered.Module.Exports.Where(export => generatedRouterIds.Contains(export.FunctionId)).ToArray();
         GuestModule internalModule = lowered.Module with
         {
-            Exports = lowered.Module.Exports.Except(affectedExports).ToArray(),
-            Functions = lowered.Module.Functions.Concat(asyncContext?.MemberGuards ?? Array.Empty<GuestFunction>()).ToArray(),
+            Exports = lowered.Module.Exports.Except(affectedExports).Except(generatedExports).ToArray(),
+            Functions = lowered.Module.Functions.Where(function => !generatedRouterIds.Contains(function.Id))
+                .Concat(asyncContext?.MemberGuards ?? Array.Empty<GuestFunction>()).ToArray(),
         };
         GuestModule? outcomes = internalModule with { LanguageOutcomeTypes = Array.Empty<GuestLanguageOutcomeType>() };
         if ((affected.Count != 0 || asyncContext?.MemberGuards.Count > 0)
@@ -405,6 +413,13 @@ public static class CSharpLanguageErrorCompiler
             || adapted is null)
             return false;
         candidate = adapted;
+        foreach (GuestFunction router in generatedRouters)
+        {
+            if (!CSharpGeneratedLanguageErrorAdapter.TryRestore(candidate, router,
+                    generatedExports.Where(export => export.FunctionId == router.Id).ToArray(),
+                    originalFunctions, affected, out adapted, out error) || adapted is null) return false;
+            candidate = adapted;
+        }
         if (!CSharpDirectAwaitReadinessLowerer.TryWrap(candidate, out candidate, out error)) return false;
         if (SemanticContract.HasAsyncCatchVariables(semantic) && (tokenContext is null || tokenContext.HasAsync)
             && !CSharpAsyncCatchValues.TryWrap(semantic, candidate, out candidate, out error, asyncContext)) return false;

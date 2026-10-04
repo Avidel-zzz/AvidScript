@@ -11,6 +11,10 @@ namespace AvidScript.CSharpGuest;
 // first and remains the source/provenance of the published module.
 internal static class CSharpStaticSourcePreparation
 {
+    internal static string SpecializedFieldId(string ownerTypeId, string fieldSymbolId) =>
+        "symbol:field:$static:" + Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(ownerTypeId + "\n" + fieldSymbolId))).ToLowerInvariant();
+
     internal static bool TryPrepare(SemanticDocument source, out SemanticDocument? ordinary,
         out CSharpStaticExecutionContext? execution, out string? error)
     {
@@ -133,8 +137,8 @@ internal static class CSharpStaticSourcePreparation
             foreach (var field in plan.Fields)
             {
                 var symbol = symbols[field.FieldSymbolId];
-                string suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(type.Id + "\n" + symbol.Id))).ToLowerInvariant();
-                string id = "symbol:field:$static:" + suffix;
+                string id = SpecializedFieldId(type.Id, symbol.Id);
+                string suffix = id["symbol:field:$static:".Length..];
                 string fieldType = MapType(symbol.TypeId, arguments)!;
                 fieldIds.Add((symbol.Id, type.Id), id);
                 fields.Add(new(id, type.Id, fieldType));

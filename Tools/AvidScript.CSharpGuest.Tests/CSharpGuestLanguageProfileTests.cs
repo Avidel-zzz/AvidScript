@@ -126,6 +126,50 @@ internal static class CSharpGuestLanguageProfileTests
                 RunSource(CSharpGuestCapabilityCliTests.TaskSource(named, tokens, statics), $"Task {statics}/{tokens}/{named}");
             foreach (bool statics in new[] { false, true })
                 RunSource(CSharpGuestAsyncVoidCompositionTests.Source("await AvidContinuations.NextTickAsync(); Sync(-1);", statics, false), "async void " + statics);
+            RunSource("""
+                namespace AvidScript
+                {
+                    public readonly struct AActor { public readonly int Slot; public readonly int Generation; }
+                    public readonly struct InputEvent { public readonly int ActionId; public readonly int TriggerEvent; public readonly FVector Value; }
+                }
+                public static class GameplayEvents
+                {
+                    public static int Count = 1;
+                    public static void OnBeginOverlap(AvidScript.AActor actor, AvidScript.FVector point) { Count++; }
+                    public static void OnInput(AvidScript.InputEvent input)
+                    {
+                        if (input.ActionId < 0) throw new System.Exception();
+                        Count = input.ActionId;
+                    }
+                    [AvidScript.AvidContinuation(11)] public static void Delayed() { Count++; }
+                    [AvidScript.AvidContinuation(12)]
+                    public static void Loaded(AvidScript.AvidContinuationStatus status, AvidScript.AvidLoadedObject loaded) { Count++; }
+                }
+                """, "generated gameplay outcome boundaries");
+            var gameplayModule = GuestIrSerializer.Deserialize(File.ReadAllBytes(PathOf("cli.guest.json")));
+            var routers = gameplayModule.Functions.Where(function => function.Id is "function:synthetic:gameplay_event"
+                or "function:synthetic:continuation" or "function:synthetic:continuation_v2").ToArray();
+            const string boundaryPrefix = "function:language_error_entry:generated:";
+            var boundaries = gameplayModule.Functions.Where(function => function.Id.StartsWith(boundaryPrefix, StringComparison.Ordinal)).ToArray();
+            // The current Semantic contract emits v2 instead of emitting both
+            // continuation ABIs for the same source.
+            Check(routers.Length == 2 && routers.Any(function => function.Id == "function:synthetic:continuation_v2")
+                && boundaries.Length == 4 && routers.SelectMany(function => function.Blocks).SelectMany(block => block.Instructions)
+                .Where(instruction => instruction.Op == "call").All(instruction => boundaries.Any(function => function.Id == instruction.TargetId)),
+                "all affected typed callbacks pass through private checked boundaries");
+            Check(gameplayModule.Exports.Count == 2 && gameplayModule.Exports.Any(export => export.Name == "avid_on_gameplay_event")
+                && gameplayModule.Exports.Any(export => export.Name == "avid_on_continuation_v2")
+                && gameplayModule.Exports.All(export => !export.FunctionId.StartsWith(boundaryPrefix, StringComparison.Ordinal)),
+                "gameplay boundary adapters do not add public exports");
+            Check(boundaries.All(function => function.ReturnTypeId == "type:void"
+                && function.Blocks.Any(block => block.Terminator.Kind == "trap")
+                && function.Blocks.SelectMany(block => block.Instructions).Any(instruction => instruction.TargetId == "import:language_error_report_v1")),
+                "callback errors use the same reporting and abort policy as UE entries");
+            var gameplayDebugMap = CSharpGuestDebugMapSerializer.Deserialize(File.ReadAllBytes(PathOf("cli.debug.json")));
+            Check(gameplayDebugMap.DefinedFunctionCount == gameplayModule.Functions.Count + gameplayModule.FramedExports.Count
+                && gameplayDebugMap.Functions.All(function => routers.All(router => function.GuestFunctionId != router.Id)
+                    && !function.GuestFunctionId.StartsWith(boundaryPrefix, StringComparison.Ordinal)),
+                "generated callback boundaries keep function indices without invented source locations");
             string original = CSharpGuestCapabilityCliTests.TaskSource(true, true, true);
             byte[] before = RunSource(original, "before edit");
             byte[] after = RunSource(original.Replace("Sync(7)", "Sync(8)", StringComparison.Ordinal), "after edit");

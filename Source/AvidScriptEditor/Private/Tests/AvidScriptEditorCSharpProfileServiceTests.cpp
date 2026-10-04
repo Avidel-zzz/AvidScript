@@ -180,7 +180,8 @@ bool FAvidScriptEditorCSharpProfileServiceDefaultTemplateTest::RunTest(const FSt
 	FAvidScriptEditorCSharpProfileLoadResult LoadResult;
 	TestTrue(TEXT("Generated default C# profile loads"), FAvidScriptEditorCSharpProfileService::LoadProfile(TemplatePath, LoadResult));
 	TestTrue(TEXT("Generated default C# profile load succeeds"), LoadResult.bSucceeded);
-	TestEqual(TEXT("Generated template uses schema version 2"), LoadResult.SchemaVersion, 2);
+	TestEqual(TEXT("Generated template uses explicit language profile schema"), LoadResult.SchemaVersion, 11);
+	TestEqual(TEXT("Generated template selects the gameplay language contract"), LoadResult.BuildConfig.LanguageProfile, FString(TEXT("gameplay-v1")));
 	TestTrue(TEXT("Generated template defaults to EngineGameplay"), LoadResult.bUsesEngineGameplayBindingProfile);
 	TestTrue(TEXT("Generated template enables data-lane fusion"), LoadResult.BuildConfig.bEnableDataLaneFusion);
 	TestTrue(TEXT("Generated template enables cooperative safepoints"), LoadResult.BuildConfig.bEnableCooperativeSafepoints);

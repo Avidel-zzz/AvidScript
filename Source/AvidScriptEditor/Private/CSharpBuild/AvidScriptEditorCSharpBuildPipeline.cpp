@@ -813,6 +813,16 @@ bool FAvidScriptEditorCSharpBuildPipeline::CompleteFinal(
 	auto PublishVmArtifactAndFinish = [&Plan, &OutResult, &FinishArtifactTransaction]()
 	{
 		bool bCommit = OutResult.bSucceeded;
+		if (bCommit && Plan.bAutomaticBindingSlice && Plan.bBootstrapCompleted
+			&& (OutResult.LanguageProfile != Plan.BootstrapResult.LanguageProfile
+				|| OutResult.LanguageProfileContractSha256 != Plan.BootstrapResult.LanguageProfileContractSha256))
+		{
+			SetAvidScriptCSharpBuildPipelineFailure(
+				TEXT("language_profile_changed_during_build"),
+				TEXT("Bootstrap and final compiler receipts have different language profile identities."),
+				TEXT("rebuild both stages with the same compiler-owned profile contract"), OutResult);
+			bCommit = false;
+		}
 		if (bCommit
 			&& !FAvidScriptEditorVmArtifactPublisher::Publish(
 				Plan.FinalConfig,

@@ -15,7 +15,7 @@ internal static class CSharpLanguageErrorEntryAdapter
     internal static bool TryAdd(GuestModule module,
         IReadOnlyList<GuestExport> affectedExports,
         IReadOnlyDictionary<string, GuestFunction> originalFunctions,
-        out GuestModule? adapted, out string? error)
+        out GuestModule? adapted, out string? error, bool publishExports = true)
     {
         adapted = null;
         error = null;
@@ -98,7 +98,7 @@ internal static class CSharpLanguageErrorEntryAdapter
                     new GuestTerminator("return", null, null, null,
                         hasValue ? "entry:value" : null)),
             }));
-            exports.Add(new GuestExport(export.Name, id));
+            if (publishExports) exports.Add(new GuestExport(export.Name, id));
         }
         adapted = module with
         {

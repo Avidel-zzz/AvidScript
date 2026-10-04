@@ -81,6 +81,8 @@ public static class CSharpGuestStateSchemaProjector
             StringComparer.Ordinal);
         Dictionary<string, string> fingerprintCache = new(StringComparer.Ordinal);
         List<CSharpGuestStateSlot> projected = new();
+        bool validatedStaticPlan = document.StaticInitialization is not null
+            && SemanticStaticInitializationValidator.IsValid(document);
 
         foreach (SemanticSymbol field in document.Symbols
             .Where(symbol => symbol.Kind == "field"
@@ -104,6 +106,12 @@ public static class CSharpGuestStateSchemaProjector
             }
 
             string globalId = CSharpGuestIds.Global(field.Id);
+            // Static normalization specializes storage per closed owner. Keep
+            // the source field's stable migration identity, while resolving
+            // only storage authorized by the validated source plan.
+            if (validatedStaticPlan && document.StaticInitialization!.Types.Any(plan =>
+                    plan.TypeId == ownerTypeId && plan.Fields.Any(item => item.FieldSymbolId == field.Id)))
+                globalId = CSharpGuestIds.Global(CSharpStaticSourcePreparation.SpecializedFieldId(ownerTypeId, field.Id));
             string typeFingerprint = string.Empty;
             GuestStateSlot? slot = null;
             bool isSafe = field.TypeId is not null
@@ -113,8 +121,10 @@ public static class CSharpGuestStateSchemaProjector
                     fingerprintCache,
                     new HashSet<string>(StringComparer.Ordinal),
                     out typeFingerprint)
-                && globals.ContainsKey(globalId)
-                && slots.TryGetValue(globalId, out slot);
+                && globals.TryGetValue(globalId, out GuestGlobal? global)
+                && global.TypeId == field.TypeId
+                && slots.TryGetValue(globalId, out slot)
+                && slot.TypeId == field.TypeId;
             if (!isSafe)
             {
                 if (fieldContract.Disposition == "persist")

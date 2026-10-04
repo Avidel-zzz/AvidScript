@@ -684,8 +684,9 @@ bool SerializeAvidScriptCSharpProfileTemplate(
 	FString& OutJsonText)
 {
 	const TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
-	Object->SetNumberField(TEXT("schema_version"), 2.0);
+	Object->SetNumberField(TEXT("schema_version"), 11.0);
 	Object->SetStringField(TEXT("language"), TEXT("csharp"));
+	Object->SetStringField(TEXT("language_profile"), TEXT("gameplay-v1"));
 	Object->SetStringField(
 		TEXT("source_path"),
 		MakeAvidScriptCSharpProfileTemplateStoredPath(TemplateResult.SourcePath));
@@ -869,16 +870,21 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 			&& SchemaVersion != 7.0
 			&& SchemaVersion != 8.0
 			&& SchemaVersion != 9.0
-			&& SchemaVersion != 10.0))
+			&& SchemaVersion != 10.0
+			&& SchemaVersion != 11.0))
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("profile_schema_unsupported"),
-			TEXT("C# profile schema_version must be an integer from 1 through 10."),
-			TEXT("update the profile JSON to schema_version 10"),
+			TEXT("C# profile schema_version must be an integer from 1 through 11."),
+			TEXT("update the profile JSON to schema_version 11"),
 			OutResult);
 		return false;
 	}
 	OutResult.SchemaVersion = static_cast<int32>(SchemaVersion);
+	// Schema 11 adds language selection; its binding permissions are exactly
+	// Schema 10. Keep that mapping explicit rather than accepting future schemas.
+	const int32 BindingSchemaVersion = OutResult.SchemaVersion == 11
+		? 10 : OutResult.SchemaVersion;
 
 	FString Language;
 	if (!TryGetAvidScriptCSharpProfileStringField(ProfileObject, TEXT("language"), Language) || !Language.Equals(TEXT("csharp"), ESearchCase::IgnoreCase))
@@ -979,6 +985,30 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 	Config.Configuration = TryGetAvidScriptCSharpProfileStringField(ProfileObject, TEXT("configuration"), Configuration)
 		? Configuration
 		: FString(TEXT("Release"));
+	if (OutResult.SchemaVersion < 11 && ProfileObject->HasField(TEXT("language_profile")))
+	{
+		SetAvidScriptCSharpProfileFailure(
+			TEXT("language_profile_schema_unsupported"),
+			TEXT("language_profile requires C# profile schema_version 11."),
+			TEXT("explicitly upgrade the profile to schema_version 11 before selecting a language contract"), OutResult);
+		return false;
+	}
+	if (OutResult.SchemaVersion == 11)
+	{
+		const TSharedPtr<FJsonValue>* LanguageProfileValue = ProfileObject->Values.Find(TEXT("language_profile"));
+		if (LanguageProfileValue == nullptr || !LanguageProfileValue->IsValid()
+			|| (*LanguageProfileValue)->Type != EJson::String
+			|| !ProfileObject->TryGetStringField(TEXT("language_profile"), Config.LanguageProfile)
+			|| Config.LanguageProfile.Len() > 128
+			|| Config.LanguageProfile != Config.LanguageProfile.TrimStartAndEnd())
+		{
+			SetAvidScriptCSharpProfileFailure(
+				TEXT("language_profile_invalid"),
+				TEXT("Schema 11 requires a language_profile string; use gameplay-v1 or an empty string for legacy."),
+				TEXT("set language_profile explicitly; supported names are resolved by the C# compiler"), OutResult);
+			return false;
+		}
+	}
 
 	FString DataLaneFusion;
 	if (TryGetAvidScriptCSharpProfileStringField(
@@ -1067,14 +1097,14 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 		BindingProfileObject != nullptr
 		&& (*BindingProfileObject).IsValid()
 		&& (*BindingProfileObject)->HasField(TEXT("object_factories"));
-	if (OutResult.SchemaVersion != 3
-		&& OutResult.SchemaVersion != 4
-		&& OutResult.SchemaVersion != 5
-		&& OutResult.SchemaVersion != 6
-		&& OutResult.SchemaVersion != 7
-		&& OutResult.SchemaVersion != 8
-		&& OutResult.SchemaVersion != 9
-		&& OutResult.SchemaVersion != 10
+	if (BindingSchemaVersion != 3
+		&& BindingSchemaVersion != 4
+		&& BindingSchemaVersion != 5
+		&& BindingSchemaVersion != 6
+		&& BindingSchemaVersion != 7
+		&& BindingSchemaVersion != 8
+		&& BindingSchemaVersion != 9
+		&& BindingSchemaVersion != 10
 		&& bHasSelfClassPath)
 	{
 		SetAvidScriptCSharpProfileFailure(
@@ -1084,13 +1114,13 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 			OutResult);
 		return false;
 	}
-	if (OutResult.SchemaVersion != 4
-		&& OutResult.SchemaVersion != 5
-		&& OutResult.SchemaVersion != 6
-		&& OutResult.SchemaVersion != 7
-		&& OutResult.SchemaVersion != 8
-		&& OutResult.SchemaVersion != 9
-		&& OutResult.SchemaVersion != 10
+	if (BindingSchemaVersion != 4
+		&& BindingSchemaVersion != 5
+		&& BindingSchemaVersion != 6
+		&& BindingSchemaVersion != 7
+		&& BindingSchemaVersion != 8
+		&& BindingSchemaVersion != 9
+		&& BindingSchemaVersion != 10
 		&& bHasObjectFactories)
 	{
 		SetAvidScriptCSharpProfileFailure(
@@ -1109,22 +1139,22 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 			OutResult);
 		return false;
 	}
-	if ((OutResult.SchemaVersion == 2
-			|| OutResult.SchemaVersion == 3
-			|| OutResult.SchemaVersion == 4
-			|| OutResult.SchemaVersion == 5
-			|| OutResult.SchemaVersion == 6
-			|| OutResult.SchemaVersion == 7
-			|| OutResult.SchemaVersion == 8
-			|| OutResult.SchemaVersion == 9
-			|| OutResult.SchemaVersion == 10)
+	if ((BindingSchemaVersion == 2
+			|| BindingSchemaVersion == 3
+			|| BindingSchemaVersion == 4
+			|| BindingSchemaVersion == 5
+			|| BindingSchemaVersion == 6
+			|| BindingSchemaVersion == 7
+			|| BindingSchemaVersion == 8
+			|| BindingSchemaVersion == 9
+			|| BindingSchemaVersion == 10)
 		&& bHasBindingProfile)
 	{
 		if (!ProfileObject->TryGetObjectField(TEXT("binding_profile"), BindingProfileObject)
 			|| BindingProfileObject == nullptr
 			|| !ParseAvidScriptCSharpProjectBindingProfile(
 				*BindingProfileObject,
-				OutResult.SchemaVersion,
+				BindingSchemaVersion,
 				OutResult))
 		{
 			if (OutResult.ErrorCategory.IsEmpty())

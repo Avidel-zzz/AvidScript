@@ -30,11 +30,12 @@ bool ApplyAvidScriptCSharpBuildReportMetadata(
 		|| !Report.bHasSemanticCache
 		|| !Report.bSemanticCacheValid
 		|| !Report.bHasCompilationCache
-		|| !Report.bCompilationCacheValid)
+		|| !Report.bCompilationCacheValid
+		|| (Report.bHasLanguageProfile && !Report.bLanguageProfileValid))
 	{
 		SetAvidScriptCSharpBuildInvocationFailure(
 			TEXT("report_contract_invalid"),
-			TEXT("C# build report is missing valid invocation or cache metadata."),
+			TEXT("C# build report is missing valid invocation, cache or language profile metadata."),
 			TEXT("regenerate the C# build report with the current AvidScript toolchain"),
 			OutResult);
 		return false;
@@ -65,6 +66,8 @@ bool ApplyAvidScriptCSharpBuildReportMetadata(
 	OutResult.CompilationCacheDiagnosticCode = Report.CompilationCacheDiagnosticCode;
 	OutResult.CompilationCacheDiagnosticMessage = Report.CompilationCacheDiagnosticMessage;
 	OutResult.Diagnostics = Report.Diagnostics;
+	OutResult.LanguageProfile = Report.LanguageProfile;
+	OutResult.LanguageProfileContractSha256 = Report.LanguageProfileContractSha256;
 	return true;
 }
 
@@ -148,6 +151,7 @@ FString BuildAvidScriptCSharpBuildInvocationParameters(const FAvidScriptEditorCS
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-DotNetPath"), Config.DotNetPath);
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-OutputRoot"), Config.OutputRoot);
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-Configuration"), Config.Configuration);
+	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-LanguageProfile"), Config.LanguageProfile);
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-SourcePath"), Config.SourcePath);
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-ProjectPath"), Config.ProjectPath);
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-ModuleId"), Config.ModuleId);
@@ -355,6 +359,15 @@ bool FAvidScriptEditorCSharpBuildInvoker::Finalize(
 			TEXT("C# build process exited successfully but the structured report success contract is invalid."),
 			TEXT("regenerate the C# build report with the current AvidScript toolchain"),
 			OutResult);
+		return false;
+	}
+	if (Config.LanguageProfile != OutResult.LanguageProfile
+		|| (Config.LanguageProfile.IsEmpty() && Report.bHasLanguageProfile))
+	{
+		SetAvidScriptCSharpBuildInvocationFailure(
+			TEXT("language_profile_receipt_mismatch"),
+			TEXT("The successful compiler receipt does not match the requested language profile."),
+			TEXT("rebuild with the requested profile; do not publish a silently downgraded or upgraded module"), OutResult);
 		return false;
 	}
 	if (!FPaths::FileExists(Config.ManifestPath))

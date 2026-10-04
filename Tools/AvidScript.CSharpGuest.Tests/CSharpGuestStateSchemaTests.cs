@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using AvidScript.CSharpGuest;
 using AvidScript.CSharpFrontend;
@@ -23,7 +24,8 @@ internal static class CSharpGuestStateSchemaTests
         DelegateEventOnlyScriptDefinesStateOwner();
         CompatiblePersistedUnsafeSourceFailsWithAsState1005();
         TypeFingerprintChangesWithValueLayout();
-        return 12;
+        StaticSourcePersistenceResolvesActualStorage();
+        return 13;
     }
 
     private static void LegacyContractsProduceCompatibleSchemaV2()
@@ -326,6 +328,54 @@ internal static class CSharpGuestStateSchemaTests
 
         Assert(baseline.Slots[0].TypeFingerprint != changed.Slots[0].TypeFingerprint,
             "storage and layout changes should invalidate a stable field type fingerprint");
+    }
+
+    private static void StaticSourcePersistenceResolvesActualStorage()
+    {
+        const string source = """
+            using AvidScript;
+            using System.Runtime.InteropServices;
+            [AvidStateContract(AvidStateMode.Explicit)]
+            public static class Script
+            {
+                [AvidPersist, AvidStateAlias("OldRotation")] private static float Rotation = 1.0f;
+                [AvidTransient] private static int Pending = 2;
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+                public static void Tick(float deltaSeconds) { Rotation += deltaSeconds; Pending++; }
+            }
+            """;
+        const string sourceId = "Scripts/StaticState.cs";
+        var document = SemanticAnalyzer.Analyze(source, sourceId,
+            FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256,
+            new[] { new SemanticReferenceSource(StateContractFacade, "generated://StateContracts.cs") },
+            new SemanticCompilerWorkspace(), enableStaticInitialization: true);
+        Assert(document.Succeeded && SemanticStaticInitializationValidator.IsValid(document),
+            "persisted static source must retain its validated initialization plan");
+        string hash = Convert.ToHexString(SHA256.HashData(SemanticSerializer.Serialize(document))).ToLowerInvariant();
+        var compilation = CSharpGuestCompiler.Compile(document, hash, true, false, true);
+        Assert(compilation.Succeeded && compilation.Module is not null,
+            "persisted source must compile through the production static pipeline");
+        var module = compilation.Module!;
+        var storage = module.MemoryLayout.StateSlots.Single(slot => slot.TypeId == "type:float32");
+        var schema = CSharpGuestStateSchemaProjector.Project(document, module);
+        Assert(storage.GlobalId.Contains("$static:", StringComparison.Ordinal)
+            && schema.Slots.Count == 1 && schema.Slots[0].StableId == "state:type:global::Script:Rotation"
+            && schema.Slots[0].Aliases.SequenceEqual(new[] { "state:type:global::Script:OldRotation" })
+            && schema.Slots[0].Offset == storage.Offset && schema.Slots[0].Size == storage.Size,
+            "source identity and aliases must resolve the actual specialized slot without persisting transient state");
+        void Reject(GuestModule candidate, string reason)
+        {
+            bool rejected = false;
+            try { CSharpGuestStateSchemaProjector.Project(document, candidate); }
+            catch (InvalidDataException error) { rejected = error.Message.StartsWith("ASSTATE1005:", StringComparison.Ordinal); }
+            Assert(rejected, reason);
+        }
+        Reject(module with { Globals = module.Globals.Where(global => global.Id != storage.GlobalId).ToArray() },
+            "an absent specialized global cannot produce a migration slot");
+        Reject(module with { MemoryLayout = module.MemoryLayout with
+            { StateSlots = module.MemoryLayout.StateSlots.Select(slot => slot.GlobalId == storage.GlobalId
+                ? slot with { TypeId = "type:int32" } : slot).ToArray() } },
+            "a storage type mismatch cannot produce a migration slot");
     }
 
     private static void Assert(bool condition, string message)
