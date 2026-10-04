@@ -75,6 +75,7 @@ function Get-AvidScriptSemanticCacheToolchainFiles {
         (Join-Path $PluginRootFullPath "Build\InvokeCSharpFrontend.ps1"),
         (Join-Path $PluginRootFullPath "Build\InvokeCSharpSemantic.ps1"),
         (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpCompilerWorker.ps1"),
+        (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpBindingPackage.ps1"),
         (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpPreparedSemantic.ps1"),
         (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpSemanticCache.ps1"),
         (Join-Path $PluginRootFullPath "Build\BuildCSharpActorLifecycle.ps1"))

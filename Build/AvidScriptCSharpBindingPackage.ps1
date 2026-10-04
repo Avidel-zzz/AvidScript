@@ -72,22 +72,25 @@ function Test-AvidScriptBindingPathContained {
     }
 
     $RelativeCandidate = $NormalizedCandidate.Substring($ContainedPrefix.Length)
-    $CurrentPath = $NormalizedRoot
-    foreach ($Segment in @($RelativeCandidate -split '[\\/]')) {
-        if ([string]::IsNullOrWhiteSpace($Segment)) {
-            continue
+    # Keep a drive root absolute: Path.Combine('C:', 'child') is drive-relative.
+    $CurrentPath = $ContainedPrefix
+    $Segments = $RelativeCandidate.Split([char[]]'\/', [System.StringSplitOptions]::RemoveEmptyEntries)
+    for ($Index = 0; $Index -lt $Segments.Length; ++$Index) {
+        $CurrentPath = [System.IO.Path]::Combine($CurrentPath, $Segments[$Index])
+        try {
+            # Query each component afresh. Missing output components are allowed,
+            # but access errors must not masquerade as a missing path.
+            $Attributes = [System.IO.File]::GetAttributes($CurrentPath)
         }
-        $CurrentPath = Join-Path $CurrentPath $Segment
-        if (Test-Path -LiteralPath $CurrentPath) {
-            try {
-                $Attributes = [System.IO.File]::GetAttributes($CurrentPath)
-            }
-            catch {
-                return $false
-            }
-            if (($Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-                return $false
-            }
+        catch [System.IO.FileNotFoundException] { continue }
+        catch [System.IO.DirectoryNotFoundException] { continue }
+        catch { return $false }
+        if (($Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            return $false
+        }
+        if ($Index -lt $Segments.Length - 1 -and
+            ($Attributes -band [System.IO.FileAttributes]::Directory) -eq 0) {
+            return $false
         }
     }
     return $true

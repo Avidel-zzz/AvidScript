@@ -53,6 +53,7 @@ function Get-AvidScriptCompilationCacheToolchainFingerprint {
         (Join-Path $PluginRootFullPath "Build\BuildCSharpActorLifecycle.ps1"),
         (Join-Path $PluginRootFullPath "Build\InvokeCSharpGuestCompiler.ps1"),
         (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpCompilerWorker.ps1"),
+        (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpBindingPackage.ps1"),
         (Join-Path $PluginRootFullPath "Build\AvidScriptCSharpCompilationCache.ps1"))
     $Files = foreach ($RequiredFile in $RequiredFiles) {
         Assert-AvidScriptCSharpCompilationCache `
