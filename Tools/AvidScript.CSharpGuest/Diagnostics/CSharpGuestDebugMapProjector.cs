@@ -52,6 +52,17 @@ public static class CSharpGuestDebugMapProjector
                 nameof(implicitFunctionImportCount));
         }
 
+        if (SemanticObjectAwaitCancellation.Has(document))
+        {
+            if (!GuestObjectAwaitCancellation.HasDeclaredExecutionBase(module)
+                || !GuestModuleValidator.Validate(module).Succeeded
+                || !CSharpObjectAwaitExecutionContext.TryCreate(document, out var execution, out _))
+                throw new InvalidDataException("ASDEBUG1003: Object cancellation debug mapping requires its validated source/execution pair.");
+            // Recreate the compiler's private view for source mappings only.
+            // The original source and published module remain unchanged.
+            document = execution!;
+        }
+
         var staticTargets = new Dictionary<string, CSharpStaticDebugTarget>(StringComparer.Ordinal);
         var staticGuards = new HashSet<string>(StringComparer.Ordinal);
         if (document.StaticInitialization is not null)

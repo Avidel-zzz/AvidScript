@@ -1,10 +1,12 @@
 [CmdletBinding()]
 param([Parameter(Mandatory = $true)][string]$BindingPackagePath,
     [string]$DotNetPath = (Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'),
-    [switch]$StandardCancellationTokens)
+    [switch]$StandardCancellationTokens,
+    [switch]$ObjectAwaitCancellation)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($ObjectAwaitCancellation -and -not $StandardCancellationTokens) { throw 'Object await contract requires the standard token fixture.' }
 $PluginRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $ProjectOwner = Split-Path -Parent (Split-Path -Parent $PluginRoot)
 $RunId = [DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssfffZ') + '-' + [Guid]::NewGuid().ToString('N')
@@ -92,7 +94,8 @@ try {
     }
     $LocalPackage = Join-Path $LocalRoot 'package.json'
     if ($StandardCancellationTokens) {
-        Check ($Package.emitter_version -ceq '49.5.0') 'standard token test uses the production emitter version'
+        $ExpectedEmitter = if ($ObjectAwaitCancellation) { '49.6.0' } else { '49.5.0' }
+        Check ($Package.emitter_version -ceq $ExpectedEmitter) 'standard token test uses its exact production emitter contract'
         $ConsumerRoot = Join-Path $ProjectRoot 'FacadeConsumer'
         $null = New-Item -ItemType Directory -Path $ConsumerRoot
         $ConsumerProject = Join-Path $ConsumerRoot 'FacadeConsumer.csproj'
@@ -231,9 +234,18 @@ public static class Cache { public static int Value; static Cache() { Value = Sc
         $null = BuildCase standard-legacy-reject disabled @() $false $false
         [IO.File]::WriteAllText($SourcePath, $StandardSource.Replace('AvidContinuations.NextTickAsync()',
             'AvidAssets.LoadObjectAsync("/Engine/EngineResources/DefaultTexture.DefaultTexture")'), $Utf8)
-        $ObjectLoad = BuildCase standard-object-composition-reject disabled @() $false
-        Check ($ObjectLoad.result -ceq 'semantic_failed' -and
-            @($ObjectLoad.diagnostics | Where-Object { $_.code -ceq 'ASBI4701' -and $_.message -like '*ASCG1004*Static source execution*' }).Count -eq 1) 'unsupported object load and static catch composition retains owner diagnosis'
+        if ($ObjectAwaitCancellation) {
+            $ObjectLoad = BuildCase standard-object-composition disabled
+            $ObjectIr = ReadJson (Join-Path $ProjectRoot ([string]$ObjectLoad.artifacts.guest_ir_file))
+            Check ($ObjectIr.schema_version -eq 39 -and $ObjectIr.ir_version -ceq '1.38' -and
+                $null -ne $ObjectIr.object_await_cancellation -and $null -ne $ObjectIr.static_storage -and
+                $null -ne $ObjectIr.cancellation_tokens) 'new object contract admits the full static catch token combination'
+        }
+        else {
+            $ObjectLoad = BuildCase standard-object-composition-reject disabled @() $false
+            Check ($ObjectLoad.result -ceq 'semantic_failed' -and
+                @($ObjectLoad.diagnostics | Where-Object { $_.code -ceq 'ASBI4701' -and $_.message -like '*ASCG1004*' }).Count -eq 1) 'old facade lacks the paired object import and retains owner rejection'
+        }
     }
     else {
         $FacadeGap = BuildCase unsupported-facade disabled @() $false

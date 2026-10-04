@@ -44,6 +44,11 @@ internal static class CSharpGuestObjectAwaitCancellationTests
             var wasm = WasmModuleCompiler.Compile(module!);
             Check(wasm.Succeeded, name + " WASM: " + string.Join(" | ", wasm.Diagnostics.Select(item => item.Message)));
             var json = GuestIrSerializer.Serialize(module!);
+            var debug = CSharpGuestDebugMapProjector.Project(semantic, module!,
+                Convert.ToHexString(SHA256.HashData(json)).ToLowerInvariant(), semantic.Source.FrontendSha256,
+                requestedModuleId: module!.ModuleId);
+            Check(debug is not null && input.SequenceEqual(SemanticSerializer.Serialize(semantic)),
+                name + " formal debug projection preserves original source");
             Check(json.SequenceEqual(GuestIrSerializer.Serialize(GuestIrSerializer.Deserialize(json)))
                 && wasm.Bytes.SequenceEqual(WasmModuleCompiler.Compile(GuestIrSerializer.Deserialize(json)).Bytes), name + " canonical round trip");
             Check(CSharpLanguageCapabilityCompiler.TryLower(semantic, hash, out var repeated, out _)

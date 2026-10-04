@@ -2012,7 +2012,7 @@ if ($CooperativeSafepoints -and
     }
 }
 $GuestIrSucceeded = $null -ne $GuestIrModel -and [bool]$GuestIrModel.succeeded
-if ($null -ne $ProfileAdmission -and
+if ($null -ne $ProfileAdmission -and $CompilerExitCode -eq 0 -and $GuestIrSucceeded -and
     ([string]$ProfileAdmission.semantic_sha256 -cne $SemanticSha256 -or
         [string]$ProfileAdmission.guest_ir_sha256 -cne (Get-Sha256Hex $GuestIrArtifactPath))) {
     Remove-LoadableArtifacts
