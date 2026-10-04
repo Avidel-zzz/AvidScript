@@ -30,6 +30,8 @@ public:
 		TArray<int64>& OutWaiters);
 	bool PropagateFailure(int64 SourceToken, int64 TargetToken,
 		TArray<int64>& OutWaiters);
+	bool PropagateTypedFailure(int64 SourceToken, const FString& ExpectedSourceType,
+		int64 TargetToken, const FString& ExpectedTargetType, TArray<int64>& OutWaiters);
 	bool Cancel(int64 Token, TArray<int64>& OutWaiters);
 	bool CancelLanguageError(int64 Token, FAvidScriptTaskLanguageError Error,
 		TSharedPtr<IAvidScriptTaskLanguageErrorLease> RootLease,
@@ -72,6 +74,8 @@ private:
 	FSlot* Find(int64 Token);
 	const FSlot* Find(int64 Token) const;
 	void ReleaseSlot(uint32 SlotIndex);
+	bool PropagateFailureChecked(int64 SourceToken, int64 TargetToken,
+		const FString* ExpectedSourceType, const FString* ExpectedTargetType, TArray<int64>& OutWaiters);
 	bool Finish(int64 Token, EAvidScriptTaskResultState State,
 		TConstArrayView<uint8> Value, FString ErrorCode, TArray<int64>& OutWaiters,
 		TOptional<FAvidScriptTaskLanguageError> LanguageError = {},

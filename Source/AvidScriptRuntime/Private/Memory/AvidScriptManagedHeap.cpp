@@ -288,6 +288,45 @@ EHeapError FHeap::RootObjectInCurrentFrame(FToken Object, std::uint32_t Invocati
 	return CreateRoot(Token(ETokenKind::Frame, Slot, Frames[Slot].Generation), Object, Root);
 }
 
+EHeapError FHeap::RootPersistentObjectsInCurrentFrame(const FPersistentRoots& Proof,
+	std::span<const FToken> InObjects, std::uint32_t InvocationFloor)
+{
+	if (const auto State = Ready(); State != EHeapError::Ok) return State;
+	if (FrameStack.size() <= InvocationFloor || !Proof.IsValidFor(*this)) return EHeapError::RootAuthority;
+	if (InObjects.size() > Limits.MaxReferencesPerLayout) return EHeapError::RootLimit;
+	std::vector<FToken> Missing;
+	Missing.reserve(InObjects.size());
+	for (const FToken Object : InObjects)
+	{
+		if (!Object) continue;
+		if (ObjectIndex(Object) == InvalidIndex) return EHeapError::InvalidObject;
+		const bool bOwned = std::any_of(Proof.Roots.begin(), Proof.Roots.end(), [&](FToken Root)
+		{
+			const auto Slot = RootIndex(Root);
+			return Slot != InvalidIndex && Roots[Slot].Frame == InvalidIndex && Roots[Slot].Object == Object;
+		});
+		if (!bOwned) return EHeapError::RootAuthority;
+		if (!IsObjectRootedInCurrentFrame(Object, InvocationFloor)
+			&& std::find(Missing.begin(), Missing.end(), Object) == Missing.end()) Missing.push_back(Object);
+	}
+	if (Missing.size() > Limits.MaxRoots - Stats.LiveRoots) return EHeapError::RootLimit;
+	std::vector<FToken> Acquired;
+	Acquired.reserve(Missing.size());
+	const auto Slot = FrameStack.back();
+	const auto Frame = Token(ETokenKind::Frame, Slot, Frames[Slot].Generation);
+	for (const FToken Object : Missing)
+	{
+		FToken Root = 0;
+		if (const auto Error = CreateRoot(Frame, Object, Root); Error != EHeapError::Ok)
+		{
+			for (const FToken Rollback : Acquired) ReleaseRoot(Rollback);
+			return Error;
+		}
+		Acquired.push_back(Root);
+	}
+	return EHeapError::Ok;
+}
+
 EHeapError FHeap::ValidateGuestRootFrame(FToken Frame, std::uint32_t InvocationFloor) const
 {
 	if (const auto State = Ready(); State != EHeapError::Ok) return State;

@@ -112,12 +112,16 @@ void ExactScalarBitsAndPadding()
     Check(CaptureValue(Value, Heap, Bytes, 0, {}, Capture) == EValueError::Ok, "scalar capture failed");
     Check(std::equal(Capture.GetBytes().begin(), Capture.GetBytes().end(), Bytes.begin()) && Capture.GetRootCount() == 0,
         "negative zero or NaN payload was numerically converted");
+    std::vector<std::uint8_t> Read(Bytes.size(), 0);
+    Check(Capture.ReadIntoFrame(Value, Heap, Read, 0) == EValueError::Ok && Read == Bytes,
+        "scalar reader changed exact bits");
     const auto Original = Bytes; Bytes[4] = 1;
     Check(CaptureValue(Value, Heap, Bytes, 0, {}, Capture) == EValueError::InvalidValue, "nonzero padding accepted");
     Check(std::equal(Capture.GetBytes().begin(), Capture.GetBytes().end(), Original.begin()), "failed padding admission changed result");
     Check(CaptureValue(Value, Heap, {}, 0, {}, Capture) == EValueError::InvalidValue, "wrong value size accepted");
     Check(CaptureValue(Plan(0, 1, {}), Heap, {}, 0, {}, Capture) == EValueError::Ok && Capture.GetBytes().empty(),
         "empty value could not replace scalar result");
+    Check(Capture.ReadIntoFrame(Plan(0, 1, {}), Heap, {}, 0) == EValueError::Ok, "empty value reader failed");
 }
 void ReferenceGraphsAndAliases()
 {
@@ -129,7 +133,12 @@ void ReferenceGraphsAndAliases()
         "aliases must retain one object root");
     Bytes[0] = 0; Ok(Heap.PopFrame(Producer)); Ok(Heap.Collect());
     Check(Heap.IsAlive(Parent) && Heap.IsAlive(Child), "captured graph did not survive producer exit");
-    const auto Consumer = Frame(Heap); Ok(Heap.RootObjectInCurrentFrame(Parent, 0));
+    const auto Consumer = Frame(Heap); std::vector<std::uint8_t> Read(16, 0);
+    Check(Capture.ReadIntoFrame(Value, Heap, Read, 0) == EValueError::Ok, "reader failed to acquire result graph");
+    Check(std::equal(Read.begin(), Read.end(), Capture.GetBytes().begin()), "reader did not copy owned bytes");
+    const auto ReaderRoots = Heap.GetStats().LiveRoots;
+    Check(Capture.ReadIntoFrame(Value, Heap, Read, 0) == EValueError::Ok && Heap.GetStats().LiveRoots == ReaderRoots,
+        "repeated or aliased reader added duplicate frame roots");
     auto Roots = Capture.TakeRoots(); Roots.Reset(); Ok(Heap.Collect());
     Check(Heap.IsAlive(Parent) && Heap.IsAlive(Child), "reader frame failed to take over graph ownership");
     Ok(Heap.PopFrame(Consumer)); Ok(Heap.Collect());
@@ -203,6 +212,82 @@ void NullAndUnimplementedResources()
     Ok(Heap.PopFrame(Producer)); auto Roots = Capture.TakeRoots(); Roots.Reset(); Ok(Heap.Collect());
     Check(Heap.GetStats().LiveObjects == 0, "null/resource tests leaked");
 }
+void ReaderAdmissionAndProof()
+{
+    FHeap Heap, Other; Configure(Heap); Configure(Other); const auto Producer = Frame(Heap);
+    const auto A = Object(Heap, Producer), B = Object(Heap, Producer);
+    auto Value = PairPlan(); std::vector<std::uint8_t> Bytes(16, 0); Token(Bytes, 0, A); Token(Bytes, 8, A);
+    FCapturedValue Capture; Check(CaptureValue(Value, Heap, Bytes, 0, Resolver, Capture) == EValueError::Ok, "reader initial capture failed");
+    const auto Consumer = Frame(Heap), ForeignFrame = Frame(Other);
+    std::vector<std::uint8_t> Read(16, 0xa5); const auto Original = Read; const auto Before = Heap.GetStats().LiveRoots;
+    auto LeafChanged = Plan(16, 8, {{0, 8, 8, ELeafKind::ManagedReference, "r:other", "p:node"},
+        {8, 8, 8, ELeafKind::ManagedReference, "r:node", "p:node"}});
+    auto KindChanged = Plan(16, 8, {{0, 8, 8, ELeafKind::Integer, "s:i64", ""}, {8, 8, 8, ELeafKind::Integer, "s:i64", ""}});
+    auto HashPacket = Packet(16, 8, {{0, 8, 8, ELeafKind::ManagedReference, "r:node", "p:node"},
+        {8, 8, 8, ELeafKind::ManagedReference, "r:node", "p:node"}});
+    ++HashPacket[24 + std::string("v:test").size()]; FValuePlan HashChanged;
+    Check(ReadValuePlan(HashPacket, HashChanged) == EValueError::Ok, "hash variation failed to parse");
+    for (const auto* Invalid : {&LeafChanged, &KindChanged, &HashChanged})
+        Check(Capture.ReadIntoFrame(*Invalid, Heap, Read, 0) == EValueError::InvalidPlan, "representation mismatch accepted");
+    Check(Capture.ReadIntoFrame(Value, Other, Read, 0) == EValueError::RootAuthority, "foreign heap read authorized");
+    Check(Capture.ReadIntoFrame(Value, Heap, Read, 2) == EValueError::RootAuthority, "invocation floor bypassed");
+    Check(Capture.ReadIntoFrame(Value, Heap, {Read.data(), 8}, 0) == EValueError::InvalidValue, "short output accepted");
+    Check(Read == Original && Heap.GetStats().LiveRoots == Before && Other.GetStats().LiveRoots == 0,
+        "rejected reader mutated bytes or frames");
+    auto Proof = Capture.TakeRoots();
+    const std::vector<FToken> TooMany(257, A);
+    Check(Heap.RootPersistentObjectsInCurrentFrame(Proof, TooMany, 0) == EHeapError::RootLimit
+        && Heap.GetStats().LiveRoots == Before, "reader object budget ignored");
+    const std::array<FToken, 2> Unowned{{A, B}};
+    Check(Heap.RootPersistentObjectsInCurrentFrame(Proof, Unowned, 0) == EHeapError::RootAuthority
+        && Heap.GetStats().LiveRoots == Before, "valid first object partially rooted before unowned second object");
+    Ok(Heap.RootObjectInCurrentFrame(B, 0)); const auto WithExisting = Heap.GetStats().LiveRoots;
+    Check(Heap.RootPersistentObjectsInCurrentFrame(Proof, {&B, 1}, 0) == EHeapError::RootAuthority
+        && Heap.GetStats().LiveRoots == WithExisting, "existing frame root bypassed proof membership");
+    Check(Capture.ReadIntoFrame(Value, Heap, Read, 0) == EValueError::RootAuthority && Read == Original,
+        "moved lease still granted reader authority");
+    Ok(Heap.PopFrame(Consumer)); Ok(Heap.PopFrame(Producer)); Ok(Other.PopFrame(ForeignFrame));
+    Proof.Reset(); Ok(Heap.Collect()); Check(Heap.GetStats().LiveObjects == 0, "reader admission leaked objects");
+}
+void ReaderRootBudgetIsAtomic()
+{
+    FHeapLimits Limits; Limits.MaxRoots = 5; FHeap Heap(Limits); Configure(Heap);
+    const auto Producer = Frame(Heap), A = Object(Heap, Producer), B = Object(Heap, Producer);
+    const auto Value = PairPlan(); std::vector<std::uint8_t> Bytes(16, 0); Token(Bytes, 0, A); Token(Bytes, 8, B);
+    FCapturedValue Capture; Check(CaptureValue(Value, Heap, Bytes, 0, Resolver, Capture) == EValueError::Ok, "reader budget capture failed");
+    Ok(Heap.PopFrame(Producer)); const auto Consumer = Frame(Heap);
+    FToken Blocker1 = 0, Blocker2 = 0; Ok(Heap.CreateRoot(Consumer, 0, Blocker1)); Ok(Heap.CreateRoot(Consumer, 0, Blocker2));
+    std::vector<std::uint8_t> Read(16, 0xa5); const auto Original = Read; const auto Before = Heap.GetStats().LiveRoots;
+    Check(Capture.ReadIntoFrame(Value, Heap, Read, 0) == EValueError::HeapFailure && Read == Original
+        && Heap.GetStats().LiveRoots == Before && !Heap.IsObjectRootedInCurrentFrame(A), "insufficient reader roots partially committed");
+    Ok(Heap.ReleaseRoot(Blocker2));
+    Check(Capture.ReadIntoFrame(Value, Heap, Read, 0) == EValueError::Ok && Read == Bytes
+        && Heap.IsObjectRootedInCurrentFrame(A) && Heap.IsObjectRootedInCurrentFrame(B), "reader budget recovery failed");
+    auto Roots = Capture.TakeRoots(); Roots.Reset(); Ok(Heap.Collect());
+    Check(Heap.IsAlive(A) && Heap.IsAlive(B), "consumer did not own all objects after last result release");
+    Ok(Heap.PopFrame(Consumer)); Ok(Heap.Collect()); Check(Heap.GetStats().LiveObjects == 0, "reader budget recovery leaked");
+}
+void NullReaderBindsHeapAndLifetime()
+{
+    FCapturedValue Capture; const auto Value = PairPlan(); std::vector<std::uint8_t> Bytes(16, 0), Read(16, 0xa5);
+    FHeap Other; Configure(Other); const auto ForeignFrame = Frame(Other);
+    {
+        FHeap Heap; Configure(Heap); const auto Producer = Frame(Heap);
+        Check(CaptureValue(Value, Heap, Bytes, 0, Resolver, Capture) == EValueError::Ok && Capture.GetRootCount() == 0,
+            "null owner capture failed");
+        Ok(Heap.PopFrame(Producer));
+        Check(Capture.ReadIntoFrame(Value, Heap, Read, 0) == EValueError::RootAuthority, "null read bypassed current frame");
+        Check(Capture.ReadIntoFrame(Value, Other, Read, 0) == EValueError::RootAuthority, "null read bypassed heap identity");
+        const auto Consumer = Frame(Heap);
+        Check(Capture.ReadIntoFrame(Value, Heap, Read, 0) == EValueError::Ok && Read == Bytes
+            && Heap.GetStats().LiveRoots == 0, "null read failed or added roots");
+        Ok(Heap.PopFrame(Consumer));
+    }
+    Read.assign(16, 0xa5);
+    Check(Capture.ReadIntoFrame(Value, Other, Read, 0) == EValueError::RootAuthority && Read[0] == 0xa5,
+        "expired null lease authorized another heap");
+    Ok(Other.PopFrame(ForeignFrame));
+}
 int CompilerWireFixtures()
 {
     std::filesystem::path Directory;
@@ -260,5 +345,6 @@ int RunTaskValueTests()
     using namespace AvidScriptTaskValueTestsPrivate;
     ParseAndAtomicRejection(); InvalidLeafShapes(); IdentityEncoding(); ExactScalarBitsAndPadding();
     ReferenceGraphsAndAliases(); ReferenceAdmissionPreservesOldValue(); RootBudgetIsAtomic(); NullAndUnimplementedResources();
-    return 8 + CompilerWireFixtures();
+    ReaderAdmissionAndProof(); ReaderRootBudgetIsAtomic(); NullReaderBindsHeapAndLifetime();
+    return 11 + CompilerWireFixtures();
 }

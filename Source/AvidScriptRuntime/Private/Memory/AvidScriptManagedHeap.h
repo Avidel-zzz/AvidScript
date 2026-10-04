@@ -144,6 +144,10 @@ public:
 	// Gives a persistent task result's object a frame-owned root before the
 	// current invocation can release its last task reference.
 	EHeapError RootObjectInCurrentFrame(FToken Object, std::uint32_t InvocationFloor);
+	// Native proof must directly own every object. Adds only missing current-frame
+	// roots, atomically; copied object tokens never authorize this operation.
+	EHeapError RootPersistentObjectsInCurrentFrame(const FPersistentRoots& Proof,
+		std::span<const FToken> Objects, std::uint32_t InvocationFloor);
 	EHeapError ValidateGuestRootFrame(FToken Frame, std::uint32_t InvocationFloor) const;
 	EHeapError ValidateGuestRootAccess(FToken Root, std::uint32_t InvocationFloor,
 		std::span<const FToken> TransferredRoots, bool bAllowTransfer) const;

@@ -459,6 +459,20 @@ bool FAvidScriptContinuationHostEndpoint::PropagateTaskFailure(
 	return true;
 }
 
+bool FAvidScriptContinuationHostEndpoint::PropagateTypedTaskFailure(
+	const int64 SourceToken, const FString& ExpectedSourceType,
+	const int64 TargetToken, const FString& ExpectedTargetType, TArray<int64>& OutWaiters)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = PinTaskOwner(SourceToken);
+	FAvidScriptTaskResultSnapshot Source;
+	if (!PinnedOwner || !PinTaskOwner(TargetToken)
+		|| !PinnedOwner->TaskResults.Read(SourceToken, Source)
+		|| !PinnedOwner->TaskResults.PropagateTypedFailure(
+			SourceToken, ExpectedSourceType, TargetToken, ExpectedTargetType, OutWaiters)) return false;
+	PinnedOwner->QueueTaskWaiters(TargetToken, Source.State, OutWaiters);
+	return true;
+}
+
 bool FAvidScriptContinuationHostEndpoint::CancelTaskResult(
 	const int64 Token, TArray<int64>& OutWaiters)
 {

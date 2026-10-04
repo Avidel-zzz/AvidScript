@@ -247,6 +247,21 @@ bool FAvidScriptSessionTaskResults::FaultLanguageError(
 bool FAvidScriptSessionTaskResults::PropagateFailure(
 	const int64 SourceToken, const int64 TargetToken, TArray<int64>& OutWaiters)
 {
+	return PropagateFailureChecked(SourceToken, TargetToken, nullptr, nullptr, OutWaiters);
+}
+
+bool FAvidScriptSessionTaskResults::PropagateTypedFailure(
+	const int64 SourceToken, const FString& ExpectedSourceType,
+	const int64 TargetToken, const FString& ExpectedTargetType, TArray<int64>& OutWaiters)
+{
+	if (ExpectedSourceType.IsEmpty() || ExpectedTargetType.IsEmpty()) return false;
+	return PropagateFailureChecked(SourceToken, TargetToken, &ExpectedSourceType, &ExpectedTargetType, OutWaiters);
+}
+
+bool FAvidScriptSessionTaskResults::PropagateFailureChecked(
+	const int64 SourceToken, const int64 TargetToken,
+	const FString* ExpectedSourceType, const FString* ExpectedTargetType, TArray<int64>& OutWaiters)
+{
 	check(IsInGameThread());
 	if (SourceToken == TargetToken)
 	{
@@ -262,8 +277,9 @@ bool FAvidScriptSessionTaskResults::PropagateFailure(
 	const FEntry& Target = TargetSlot->Entry.GetValue();
 	if (Source.Lane != Target.Lane
 		|| Source.ActivationSerial != Target.ActivationSerial
-		|| Source.TypeId != Target.TypeId
-		|| Source.bValueRequiresLease != Target.bValueRequiresLease
+		|| (ExpectedSourceType != nullptr
+			? Source.TypeId != *ExpectedSourceType || Target.TypeId != *ExpectedTargetType
+			: Source.TypeId != Target.TypeId || Source.bValueRequiresLease != Target.bValueRequiresLease)
 		|| Target.State != EAvidScriptTaskResultState::Running)
 	{
 		return false;

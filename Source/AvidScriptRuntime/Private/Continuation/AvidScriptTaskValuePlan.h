@@ -19,6 +19,7 @@ struct FValueLeaf
     std::uint32_t Offset = 0, Size = 0, Alignment = 1;
     ValueAbi::ELeafKind Kind = ValueAbi::ELeafKind::Integer;
     std::string TypeId, TargetTypeId;
+    bool operator==(const FValueLeaf&) const = default;
 };
 
 // Immutable after parsing. Shape validation is not nominal authorization: the
@@ -32,6 +33,11 @@ public:
     std::span<const FValueLeaf> GetLeaves() const { return Leaves; }
     const std::array<std::uint8_t, ValueAbi::ShapeHashBytes>& GetShapeHash() const { return ShapeHash; }
     bool RequiresLease() const;
+    bool SameRepresentation(const FValuePlan& Other) const
+    {
+        return TypeId == Other.TypeId && Size == Other.Size && Alignment == Other.Alignment
+            && ShapeHash == Other.ShapeHash && Leaves == Other.Leaves;
+    }
 private:
     friend EValueError ReadValuePlan(std::span<const std::uint8_t>, FValuePlan&);
     std::string TypeId;

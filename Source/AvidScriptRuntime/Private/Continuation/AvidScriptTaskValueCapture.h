@@ -13,10 +13,16 @@ public:
     std::span<const std::uint8_t> GetBytes() const { return Bytes; }
     Managed::FPersistentRoots TakeRoots() { return std::move(Roots); }
     std::size_t GetRootCount() const { return Roots.Count(); }
+    // The caller supplies the trusted loaded plan and retains the task/owner
+    // through this read. Failure preserves both output and current-frame roots.
+    EValueError ReadIntoFrame(const FValuePlan& ExpectedPlan, Managed::FHeap& Heap,
+        std::span<std::uint8_t> OutBytes, std::uint32_t InvocationFloor) const;
 private:
     friend EValueError CaptureValue(const FValuePlan&, Managed::FHeap&, std::span<const std::uint8_t>,
         std::uint32_t, const std::function<bool(const FValueLeaf&, std::uint32_t&)>&, FCapturedValue&);
     std::vector<std::uint8_t> Bytes;
+    FValuePlan Plan;
+    std::vector<Managed::FToken> Objects;
     Managed::FPersistentRoots Roots;
 };
 

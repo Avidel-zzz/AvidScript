@@ -3,6 +3,21 @@
 
 namespace AvidScript::TaskResult
 {
+EValueError FCapturedValue::ReadIntoFrame(const FValuePlan& ExpectedPlan, Managed::FHeap& Heap,
+    std::span<std::uint8_t> OutBytes, std::uint32_t InvocationFloor) const
+{
+    if (Plan.GetTypeId().empty() || !Plan.SameRepresentation(ExpectedPlan)) return EValueError::InvalidPlan;
+    if (Bytes.size() != Plan.GetSize() || OutBytes.size() != Bytes.size()) return EValueError::InvalidValue;
+    if (Plan.RequiresLease())
+    {
+        const auto Error = Heap.RootPersistentObjectsInCurrentFrame(Roots, Objects, InvocationFloor);
+        if (Error == Managed::EHeapError::RootAuthority) return EValueError::RootAuthority;
+        if (Error != Managed::EHeapError::Ok) return EValueError::HeapFailure;
+    }
+    std::copy(Bytes.begin(), Bytes.end(), OutBytes.begin());
+    return EValueError::Ok;
+}
+
 EValueError CaptureValue(const FValuePlan& Plan, Managed::FHeap& Heap,
     std::span<const std::uint8_t> Bytes, std::uint32_t InvocationFloor,
     const FManagedTypeResolver& ResolveType, FCapturedValue& OutValue)
@@ -33,8 +48,10 @@ EValueError CaptureValue(const FValuePlan& Plan, Managed::FHeap& Heap,
         return EValueError::InvalidValue;
     FCapturedValue Captured;
     Captured.Bytes.assign(Bytes.begin(), Bytes.end());
-    if (!Objects.empty() && Heap.RetainPersistent(Objects, Captured.Roots) != Managed::EHeapError::Ok)
+    Captured.Plan = Plan;
+    if (Plan.RequiresLease() && Heap.RetainPersistent(Objects, Captured.Roots) != Managed::EHeapError::Ok)
         return EValueError::HeapFailure;
+    Captured.Objects = std::move(Objects);
     OutValue = std::move(Captured); return EValueError::Ok;
 }
 }

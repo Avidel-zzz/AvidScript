@@ -97,4 +97,8 @@ public:
 	virtual bool SucceedRootedTaskResult(int64 Token, TConstArrayView<uint8> Value,
 		TSharedPtr<IAvidScriptTaskValueLease> ValueLease,
 		TArray<int64>& OutWaiters) = 0;
+	// Native loaded-catalog identities for both tasks; distinct result types are
+	// permitted only on this explicit path. Legacy propagation remains strict.
+	virtual bool PropagateTypedTaskFailure(int64 SourceToken, const FString& ExpectedSourceType,
+		int64 TargetToken, const FString& ExpectedTargetType, TArray<int64>& OutWaiters) = 0;
 };

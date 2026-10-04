@@ -89,6 +89,8 @@ public:
 		TArray<int64>& OutWaiters) override;
 	bool PropagateTaskFailure(int64 SourceToken, int64 TargetToken,
 		TArray<int64>& OutWaiters) override;
+	bool PropagateTypedTaskFailure(int64 SourceToken, const FString& ExpectedSourceType,
+		int64 TargetToken, const FString& ExpectedTargetType, TArray<int64>& OutWaiters) override;
 	bool CancelTaskResult(int64 Token, TArray<int64>& OutWaiters) override;
 	bool CancelTaskResultLanguageError(int64 Token,
 		FAvidScriptTaskLanguageError Error,

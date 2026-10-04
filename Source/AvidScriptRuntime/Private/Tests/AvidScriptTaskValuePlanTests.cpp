@@ -15,9 +15,13 @@ namespace AvidScriptTaskValuePlanTestPrivate
 class FValueLease final : public IAvidScriptTaskValueLease
 {
 public:
-    explicit FValueLease(AvidScript::Managed::FPersistentRoots&& InRoots) : Roots(MoveTemp(InRoots)) {}
+    explicit FValueLease(AvidScript::TaskResult::FCapturedValue&& InValue) : Value(MoveTemp(InValue)) {}
+    std::span<const std::uint8_t> GetBytes() const { return Value.GetBytes(); }
+    AvidScript::TaskResult::EValueError Read(const AvidScript::TaskResult::FValuePlan& Plan,
+        AvidScript::Managed::FHeap& Heap, std::span<std::uint8_t> Bytes) const
+    { return Value.ReadIntoFrame(Plan, Heap, Bytes, 0); }
 private:
-    AvidScript::Managed::FPersistentRoots Roots;
+    AvidScript::TaskResult::FCapturedValue Value;
 };
 }
 
@@ -69,10 +73,14 @@ bool FAvidScriptTaskValuePlanSessionTest::RunTest(const FString& Parameters)
     int64 FirstWaiter = 0, SecondWaiter = 0;
     TestTrue(TEXT("First reader queues"), Host.AwaitTaskResult(Task, 611, FirstWaiter) == EAvidScriptTaskWaitRegistration::Queued);
     TestTrue(TEXT("Second reader queues"), Host.AwaitTaskResult(Task, 612, SecondWaiter) == EAvidScriptTaskWaitRegistration::Queued);
-    TSharedPtr<IAvidScriptTaskValueLease> Lease = MakeShared<AvidScriptTaskValuePlanTestPrivate::FValueLease>(Captured.TakeRoots());
+    TSharedPtr<AvidScriptTaskValuePlanTestPrivate::FValueLease> ConcreteLease =
+        MakeShared<AvidScriptTaskValuePlanTestPrivate::FValueLease>(MoveTemp(Captured));
+    const TWeakPtr<AvidScriptTaskValuePlanTestPrivate::FValueLease> Reader = ConcreteLease;
+    TSharedPtr<IAvidScriptTaskValueLease> Lease = ConcreteLease;
     TArray<int64> Woken;
     TestTrue(TEXT("Session owns validated captured result"), Host.SucceedRootedTaskResult(Task,
-        {Captured.GetBytes().data(), static_cast<int32>(Captured.GetBytes().size())}, MoveTemp(Lease), Woken));
+        {ConcreteLease->GetBytes().data(), static_cast<int32>(ConcreteLease->GetBytes().size())}, MoveTemp(Lease), Woken));
+    ConcreteLease.Reset();
     TestTrue(TEXT("Producer releases task"), Host.ReleaseTaskResult(Task));
     TestTrue(TEXT("Producer exits"), Heap.PopFrame(ProducerFrame) == EHeapError::Ok);
     TestTrue(TEXT("Result graph survives GC"), Heap.Collect() == EHeapError::Ok && Heap.IsAlive(Parent) && Heap.IsAlive(Child));
@@ -91,8 +99,15 @@ bool FAvidScriptTaskValuePlanSessionTest::RunTest(const FString& Parameters)
     Owner->DrainReady(Ready);
     FToken ConsumerFrame = 0;
     TestTrue(TEXT("Consumer frame starts"), Heap.PushFrame(ConsumerFrame) == EHeapError::Ok);
-    TestTrue(TEXT("Reader acquires frame root before final release"), Heap.RootObjectInCurrentFrame(Parent, 0) == EHeapError::Ok);
+    std::array<std::uint8_t, 40> ReadBytes{};
+    auto PinnedReader = Reader.Pin();
+    TestTrue(TEXT("Task still owns its concrete result reader"), PinnedReader.IsValid());
+    if (PinnedReader)
+        TestTrue(TEXT("Reader atomically acquires frame roots and bytes"), PinnedReader->Read(Plan, Heap, ReadBytes) == EValueError::Ok
+            && ReadBytes == Bytes);
+    PinnedReader.Reset();
     TestTrue(TEXT("Last reader completes"), Owner->FinalizeDispatched(SecondWaiter, true));
+    TestFalse(TEXT("Final task reference releases concrete owner"), Reader.IsValid());
     TestTrue(TEXT("Consumer retains nested graph"), Heap.Collect() == EHeapError::Ok && Heap.IsAlive(Parent) && Heap.IsAlive(Child));
     TestTrue(TEXT("Consumer exits"), Heap.PopFrame(ConsumerFrame) == EHeapError::Ok);
     TestTrue(TEXT("Last root release collects result graph"), Heap.Collect() == EHeapError::Ok && Heap.GetStats().LiveObjects == 0);

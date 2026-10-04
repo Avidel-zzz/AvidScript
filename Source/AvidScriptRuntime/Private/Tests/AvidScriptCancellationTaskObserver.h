@@ -61,6 +61,9 @@ public:
 	{ return Host.FaultTaskResultLanguageError(Token, Error, MoveTemp(Lease), OutWaiters); }
 	bool PropagateTaskFailure(int64 Source, int64 Target, TArray<int64>& OutWaiters) override
 	{ return Host.PropagateTaskFailure(Source, Target, OutWaiters); }
+	bool PropagateTypedTaskFailure(int64 Source, const FString& SourceType,
+		int64 Target, const FString& TargetType, TArray<int64>& OutWaiters) override
+	{ return Host.PropagateTypedTaskFailure(Source, SourceType, Target, TargetType, OutWaiters); }
 	bool CancelTaskResult(int64 Token, TArray<int64>& OutWaiters) override
 	{ return Host.CancelTaskResult(Token, OutWaiters); }
 	bool CancelTaskResultLanguageError(int64 Token, FAvidScriptTaskLanguageError Error,
