@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--generated-composition")
+            {
+                int focused = CSharpGuestGeneratedCompositionTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.GeneratedComposition: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--object-await-cancellation")
             {
                 int focused = CSharpGuestObjectAwaitCancellationTests.Run();
@@ -370,6 +376,7 @@ internal static class Program
                 + CSharpGuestCapabilityCliTests.Run()
                 + CSharpGuestCapabilityCliTests.RunGameplayCoverage()
                 + CSharpGuestLanguageProfileTests.Run()
+                + CSharpGuestGeneratedCompositionTests.Run()
                 + CSharpGuestStaticAsyncValueTests.Run()
                 + CSharpGuestStateSchemaTests.Run()
                 + CSharpGuestDebugMapTests.Run()

@@ -36,6 +36,9 @@ public static class CSharpGuestStateSchemaProjector
             .Distinct(StringComparer.Ordinal)
             .OrderBy(id => id, StringComparer.Ordinal)
             .ToArray();
+        if (ownerTypeIds.Length > 0 && document.StaticInitialization is not null
+            && ownerTypeIds.All(id => document.UeTypeDeclarations.Any(type => type.TypeId == id)))
+            return ProjectGeneratedDomain(document, module);
         if (ownerTypeIds.Length != 1)
         {
             HashSet<string> ueTypeIds = document.UeTypeDeclarations
@@ -63,7 +66,33 @@ public static class CSharpGuestStateSchemaProjector
                 $"State schema requires exactly one exported script owner, found {ownerTypeIds.Length}.");
         }
 
-        string ownerTypeId = ownerTypeIds[0];
+        return ProjectOwner(document, module, ownerTypeIds[0]);
+    }
+
+    private static CSharpGuestStateSchema ProjectGeneratedDomain(SemanticDocument document, GuestModule module)
+    {
+        if (!CSharpStaticSourcePreparation.TryPrepare(document, out _, out var storage, out string? error))
+            throw new InvalidDataException("ASSTATE1001: Generated domain storage requires its source preparation: " + error);
+        var shapes = document.TypeShapes.ToDictionary(shape => shape.TypeId, StringComparer.Ordinal);
+        var owners = storage!.Types.Select(owner => ProjectOwner(document, module,
+            shapes.TryGetValue(owner.TypeId, out var shape) && shape.GenericDefinitionTypeId is { } definition ? definition : owner.TypeId,
+            owner.TypeId, storage.Fields)).ToArray();
+        if (owners.Select(owner => owner.ContractVersion).Distinct().Count() != 1)
+            throw new InvalidDataException("ASSTATE1003: Shared generated static owners require one domain state contract version.");
+        string domainId = "execution_domain:" + module.ModuleId;
+        var slots = owners.SelectMany(owner => owner.Slots.Select(slot => slot with
+        {
+            StableId = "state:" + domainId + ":" + slot.StableId["state:".Length..],
+            Aliases = slot.Aliases.Select(alias => "state:" + domainId + ":" + alias["state:".Length..]).ToArray(),
+        })).OrderBy(slot => slot.StableId, StringComparer.Ordinal).ToArray();
+        return new(2, "host_snapshot", owners.All(owner => owner.Policy == "explicit") ? "explicit" : "compatible",
+            owners[0].ContractVersion, domainId, slots);
+    }
+
+    private static CSharpGuestStateSchema ProjectOwner(SemanticDocument document, GuestModule module, string ownerTypeId,
+        string? storageOwnerId = null, IReadOnlyList<CSharpStaticField>? preparedFields = null)
+    {
+        string stateOwnerId = storageOwnerId ?? ownerTypeId;
         CSharpGuestResolvedStateContract contract = CSharpGuestStateContractResolver.Resolve(
             document,
             ownerTypeId);
@@ -111,20 +140,23 @@ public static class CSharpGuestStateSchemaProjector
             // only storage authorized by the validated source plan.
             if (validatedStaticPlan && document.StaticInitialization!.Types.Any(plan =>
                     plan.TypeId == ownerTypeId && plan.Fields.Any(item => item.FieldSymbolId == field.Id)))
-                globalId = CSharpGuestIds.Global(CSharpStaticSourcePreparation.SpecializedFieldId(ownerTypeId, field.Id));
+                globalId = CSharpGuestIds.Global(CSharpStaticSourcePreparation.SpecializedFieldId(stateOwnerId, field.Id));
+            string? fieldTypeId = preparedFields is null ? field.TypeId : preparedFields.SingleOrDefault(storage =>
+                storage.OwnerTypeId == stateOwnerId && storage.SymbolId ==
+                    CSharpStaticSourcePreparation.SpecializedFieldId(stateOwnerId, field.Id))?.TypeId;
             string typeFingerprint = string.Empty;
             GuestStateSlot? slot = null;
-            bool isSafe = field.TypeId is not null
+            bool isSafe = fieldTypeId is not null
                 && TryFingerprintType(
-                    field.TypeId,
+                    fieldTypeId,
                     types,
                     fingerprintCache,
                     new HashSet<string>(StringComparer.Ordinal),
                     out typeFingerprint)
                 && globals.TryGetValue(globalId, out GuestGlobal? global)
-                && global.TypeId == field.TypeId
+                && global.TypeId == fieldTypeId
                 && slots.TryGetValue(globalId, out slot)
-                && slot.TypeId == field.TypeId;
+                && slot.TypeId == fieldTypeId;
             if (!isSafe)
             {
                 if (fieldContract.Disposition == "persist")
@@ -137,9 +169,9 @@ public static class CSharpGuestStateSchemaProjector
             }
 
             projected.Add(new CSharpGuestStateSlot(
-                $"state:{ownerTypeId}:{field.Name}",
+                $"state:{stateOwnerId}:{field.Name}",
                 fieldContract.FormerNames
-                    .Select(formerName => $"state:{ownerTypeId}:{formerName}")
+                    .Select(formerName => $"state:{stateOwnerId}:{formerName}")
                     .OrderBy(alias => alias, StringComparer.Ordinal)
                     .ToArray(),
                 typeFingerprint,
@@ -154,7 +186,7 @@ public static class CSharpGuestStateSchemaProjector
             "host_snapshot",
             contract.Policy,
             contract.Version,
-            ownerTypeId,
+            stateOwnerId,
             projected);
     }
 

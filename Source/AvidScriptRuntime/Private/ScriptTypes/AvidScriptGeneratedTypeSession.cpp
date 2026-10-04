@@ -395,6 +395,42 @@ bool FAvidScriptRuntimeSession::PrepareGeneratedTypeExports(
 	return true;
 }
 
+bool FAvidScriptRuntimeSession::ReplayGeneratedActivationRoutes(
+	FAvidScriptWasmRuntimeInstance& Runtime, const FAvidScriptWasmHostContext& Context,
+	const TArray<FAvidScriptGeneratedPreparedTypeRoute>& Routes, FAvidScriptWasmSmokeResult& OutResult)
+{
+	if (!GeneratedTypeInstance || GeneratedTypeInstance->ActivatedLifecycleRoutes.IsEmpty()) return true;
+	TGuardValue<int32> CallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
+	for (const auto& Entry : GeneratedTypeInstance->ActivatedLifecycleRoutes)
+	{
+		const auto* Type = GeneratedTypeInstance->Registry->FindTypeByOrdinal(Entry.Key);
+		const auto* Member = Type ? Type->FindMember(Entry.Value) : nullptr;
+		const auto* Route = Routes.IsValidIndex(static_cast<int32>(Entry.Key)) ? &Routes[Entry.Key] : nullptr;
+		const auto* Prepared = Route && Route->bEnabled && Route->Members.IsValidIndex(static_cast<int32>(Entry.Value))
+			? &Route->Members[Entry.Value] : nullptr;
+		FAvidScriptVmError Error;
+		if (!Member || !Member->bLifecycle || !Prepared || !Prepared->Call.IsValid()
+			|| !Prepared->Parameters.IsEmpty() || Prepared->Result != EAvidScriptGeneratedNativeScalar::Void
+			|| Prepared->Call.GetParameterCellCount() != 2 || Prepared->Call.GetResultCellCount() != 0)
+		{
+			Error.Category = TEXT("generated_activation_route_invalid");
+			Error.Details = TEXT("candidate no longer has the exact native activation route");
+			Runtime.RecordContextualFailure(Context, TEXT("<generated_activation>"), Error, OutResult);
+			return false;
+		}
+		FAvidScriptVmCallFrame Frame;
+		Frame.Cells[0] = Context.OwnerHandle.Slot;
+		Frame.Cells[1] = Context.OwnerHandle.Generation;
+		Frame.CellCount = 2;
+		if (!Runtime.InvokeInContext(Prepared->Call, Context, Frame, Error))
+		{
+			Runtime.RecordContextualFailure(Context, Member->ExportName, Error, OutResult);
+			return false;
+		}
+	}
+	return true;
+}
+
 bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 	UObject& Receiver,
 	const FAvidScriptObjectHandle& ReceiverHandle,
@@ -476,6 +512,14 @@ bool FAvidScriptRuntimeSession::InvokeGeneratedTypeMember(
 		Frame.CellCount += CellCount;
 	}
 	if (Frame.CellCount != Call.GetParameterCellCount()) return false;
+	if (Member.bLifecycle && (Member.StableMemberId.EndsWith(TEXT(".BeginPlay():void"), ESearchCase::CaseSensitive)
+		|| Member.StableMemberId.EndsWith(TEXT(".Initialize():void"), ESearchCase::CaseSensitive)))
+	{
+		const TPair<uint32, uint32> Activation(TypeOrdinal, MemberOrdinal);
+		if (!GeneratedTypeInstance->ActivatedLifecycleRoutes.ContainsByPredicate(
+			[&](const auto& Prior) { return Prior.Key == Activation.Key && Prior.Value == Activation.Value; }))
+			GeneratedTypeInstance->ActivatedLifecycleRoutes.Add(Activation);
+	}
 
 	FAvidScriptVmCallResult CallResult;
 	FAvidScriptVmError Error;

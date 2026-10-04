@@ -35,8 +35,19 @@ internal static class CSharpStaticSourcePreparation
             || !source.Succeeded && source.ExceptionFlows is null && !asyncSource
             || source.AsyncMethods.Count != 0 && !asyncSource
             || source.ExceptionFlows?.Any(flow => flow.Blocks is null) == true
-            || source.RejectedAsyncExceptionFlows is not null || source.UeTypeDeclarations is not { Count: 0 })
-        { error = "Static source execution requires a validated static initialization or source-backed composition plan; generated UE routes are not connected yet."; return false; }
+            || source.RejectedAsyncExceptionFlows is not null
+            || !SemanticUeTypeContractValidator.TryValidate(source, out _)
+            // Legacy static envelopes pair an independently versioned base
+            // reader. Validate its unchanged routes using that declared base;
+            // the validated envelope remains the published provenance.
+            || (source.UeTypeDeclarations.Count != 0 || source.UeMethodCatalog?.Types.Count > 0)
+                && !SemanticUeMethodCatalogValidator.IsValid(SemanticComposableCapabilities.IsVersion(source)
+                ? source : source with
+                {
+                    SchemaVersion = source.StaticInitialization!.BaseSchemaVersion,
+                    SemanticVersion = source.StaticInitialization.BaseSemanticVersion,
+                }))
+        { error = "Static source execution requires validated initialization, composition and generated UE route contracts."; return false; }
         // The static envelope validates ownership and initializer plans. Reuse
         // the base reader for every ordinary callable, symbol and CFG invariant
         // before building dictionaries or specializing any source body.

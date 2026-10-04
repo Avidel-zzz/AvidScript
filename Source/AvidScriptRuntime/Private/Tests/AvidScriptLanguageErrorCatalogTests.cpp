@@ -1742,10 +1742,39 @@ bool FAvidScriptAsyncVoidReportTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Delayed diagnostic retains type and source span"), Error.Details.Contains(TEXT("System.Exception"))
 			&& Error.Details.Contains(TEXT("Scripts/SourceThrow.cs:1:5")));
 		TestEqual(TEXT("Delayed diagnostic names the report import"), Error.ImportName, FString(TEXT("avid_language_error_report_v1")));
+		const FString ValidatedLanguageDetails = Error.Details;
 		Runtime.BeginTypedCallbackEpochForTesting();
 		Error.Reset();
 		TestTrue(TEXT("Following callback cannot inherit a stale report"), Runtime.EndTypedCallbackEpochForTesting(Error));
 		TestTrue(TEXT("Following callback diagnostic is empty"), Error.Category.IsEmpty());
+
+		for (const FString& Category : {FString(TEXT("guest_trap")), FString(TEXT("host_import_trap"))})
+		{
+			const uint64 FailedInvocation = Runtime.BeginVmInvocation();
+			const auto FailedObject = Allocate();
+			Runtime.BeginTypedCallbackEpochForTesting();
+			TestTrue(TEXT("Language report accepts before a later primary failure"), Report(FailedObject).bSucceeded);
+			Runtime.EndVmInvocation(FailedInvocation);
+			Error.Reset();
+			Error.Category = Category;
+			Error.Details = TEXT("primary failure details");
+			Error.ImportModuleName = TEXT("primary_module");
+			Error.ImportName = TEXT("primary_import");
+			TestFalse(TEXT("A reported callback cannot commit after a VM or Host failure"), Runtime.EndTypedCallbackEpochForTesting(Error));
+			TestEqual(TEXT("Primary failure category remains authoritative"), Error.Category, Category);
+			TestEqual(TEXT("Primary import module remains authoritative"), Error.ImportModuleName, FString(TEXT("primary_module")));
+			TestEqual(TEXT("Primary import name remains authoritative"), Error.ImportName, FString(TEXT("primary_import")));
+			TestEqual(TEXT("Primary details and complete validated language source both survive"), Error.Details,
+				FString(TEXT("primary failure details\nReported language error: ")) + ValidatedLanguageDetails);
+			TestEqual(TEXT("Reported failure leaves no managed roots"), Heap->GetStats().LiveRoots, 0u);
+			TestEqual(TEXT("Reported failure leaves no managed frames"), Heap->GetStats().ActiveFrames, 0u);
+			TestEqual(TEXT("Reported failure can collect its object"), Heap->Collect(), EHeapError::Ok);
+			TestEqual(TEXT("Reported failure holds no managed objects"), Heap->GetStats().LiveObjects, 0u);
+			Runtime.BeginTypedCallbackEpochForTesting();
+			Error.Reset();
+			TestTrue(TEXT("Next callback cannot inherit primary-failure report"), Runtime.EndTypedCallbackEpochForTesting(Error));
+			TestTrue(TEXT("Next callback has no stale source diagnostic"), Error.Details.IsEmpty());
+		}
 
 		const uint64 DuplicateInvocation = Runtime.BeginVmInvocation();
 		const auto DuplicateObject = Allocate();

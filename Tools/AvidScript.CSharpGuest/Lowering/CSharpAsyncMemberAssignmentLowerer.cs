@@ -29,8 +29,16 @@ internal static class CSharpAsyncMemberAssignmentLowerer
                 .Where(operation => operation.Kind == SemanticCancellationTokens.Read))
                 sites.Add(new(TokenGuardId(method.MethodSymbolId, operation.Span.Start), operation.Children[0].TypeId!, operation.Span));
         var producers = source.AsyncMethods.Select(method => method.MethodSymbolId).ToHashSet(StringComparer.Ordinal);
-        var calls = source.Callables.Where(callable => !callable.IsStatic && producers.Contains(callable.MethodSymbolId))
+        // UE handles already have receiver authority guards on their callees.
+        // Language null outcomes apply to managed receivers, including calls
+        // made by synchronous source methods before the Task is created.
+        var calls = source.Callables.Where(callable => !callable.IsStatic && producers.Contains(callable.MethodSymbolId)
+                && !CSharpUeReceivers.IsType(source, callable.ContainingTypeId))
             .ToDictionary(callable => callable.MethodSymbolId, StringComparer.Ordinal);
+        foreach (var method in source.Methods)
+        foreach (var operation in Operations(method.Root))
+            if (operation.Kind == "invocation" && operation.SymbolId is { } called && calls.TryGetValue(called, out var producer))
+                sites.Add(new(TaskGuardId(method.MethodSymbolId, operation.Span.Start), producer.ContainingTypeId, operation.Span));
         foreach (var method in source.AsyncMethods)
         foreach (var segment in method.Segments)
         {
@@ -48,7 +56,9 @@ internal static class CSharpAsyncMemberAssignmentLowerer
 
     internal static bool CheckTaskReceiver(CSharpFunctionLoweringContext context, SemanticAsyncMethod method,
         SemanticAsyncAwaitSite site, string receiver, List<GuestInstruction> instructions) =>
-        EmitTaskGuard(context, TaskGuardId(method.MethodSymbolId, site.Span.Start), receiver, instructions);
+        site.TaskCallableId is { } id && context.Document.Callables.Any(callable => callable.MethodSymbolId == id
+            && CSharpUeReceivers.IsType(context.Document, callable.ContainingTypeId))
+        || EmitTaskGuard(context, TaskGuardId(method.MethodSymbolId, site.Span.Start), receiver, instructions);
 
     internal static bool CheckTokenReceiver(CSharpFunctionLoweringContext context, SemanticOperation operation,
         string receiver, List<GuestInstruction> instructions) => EmitTaskGuard(context,
@@ -58,6 +68,7 @@ internal static class CSharpAsyncMemberAssignmentLowerer
         SemanticCallable target, IReadOnlyList<string> operands, List<GuestInstruction> instructions)
     {
         if (target.IsStatic || CSharpAsyncSynchronousExecutionContext.Find(context.Document) is null
+            || CSharpUeReceivers.IsType(context.Document, target.ContainingTypeId)
             || !context.Document.AsyncMethods.Any(method => method.MethodSymbolId == target.MethodSymbolId)) return true;
         return operands.Count > 0 && EmitTaskGuard(context,
             TaskGuardId(context.Callable.MethodSymbolId, operation.Span.Start), operands[0], instructions);

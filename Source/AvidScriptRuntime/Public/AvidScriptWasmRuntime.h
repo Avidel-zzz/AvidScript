@@ -23,6 +23,7 @@ struct FAvidScriptTaskLanguageError;
 class FAvidScriptLanguageErrorCatalog;
 class FAvidScriptProfilerEventBuffer;
 class UWorld;
+class FProperty;
 class IAvidScriptGeneratedTypeAuthority;
 class FAvidScriptGeneratedTypeRegistrySnapshot;
 struct FAvidScriptGeneratedTypeHostBindings;
@@ -373,6 +374,8 @@ public:
 		const FAvidScriptGeneratedTypeRegistrySnapshot& Registry, uint32& OutOrdinal);
 	UObject* ResolveGeneratedTypeReceiver(
 		int64 PackedSelf, uint32 TypeOrdinal, const FAvidScriptGeneratedTypeRegistrySnapshot& Registry) const;
+	bool PrepareGeneratedPropertyWrite(int64 PackedSelf, UObject& Receiver,
+		FProperty& Property, const FString& ImportName);
 	bool ConfigureExecutionBudget(
 		const FAvidScriptVmLoadConfig::FExecutionBudget& InBudget,
 		FString& OutError);

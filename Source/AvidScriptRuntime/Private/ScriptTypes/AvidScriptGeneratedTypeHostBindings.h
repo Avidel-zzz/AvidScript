@@ -24,6 +24,7 @@ struct FAvidScriptGeneratedPropertyHostContext : FAvidScriptGeneratedReceiverHos
 {
 	UClass* ExpectedClass = nullptr;
 	FProperty* Property = nullptr;
+	FString SetterImportName;
 	FAvidScriptGeneratedPropertyI32Read ReadI32 = nullptr;
 	FAvidScriptGeneratedPropertyI32Write WriteI32 = nullptr;
 	FAvidScriptGeneratedPropertyI64Read ReadI64 = nullptr;

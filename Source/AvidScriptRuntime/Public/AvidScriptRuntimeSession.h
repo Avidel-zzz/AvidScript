@@ -68,6 +68,8 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionTestSnapshot
 	int32 ContinuationStateBytes = 0;
 	int32 ReadyContinuationCount = 0;
 	uint32 ManagedLiveRoots = 0;
+	uint32 ManagedStaticRoots = 0;
+	uint32 ManagedActiveFrames = 0;
 	uint32 ManagedLiveObjects = 0;
 };
 #endif
@@ -306,6 +308,10 @@ private:
 		FAvidScriptWasmRuntimeInstance& Runtime,
 		TArray<FAvidScriptGeneratedPreparedTypeRoute>& OutRoutes,
 		FString& OutError) const;
+	bool ReplayGeneratedActivationRoutes(FAvidScriptWasmRuntimeInstance& Runtime,
+		const FAvidScriptWasmHostContext& Context,
+		const TArray<FAvidScriptGeneratedPreparedTypeRoute>& Routes,
+		FAvidScriptWasmSmokeResult& OutResult);
 	void SetRuntimeBaseContext(FAvidScriptWasmRuntimeInstance& Runtime, const FAvidScriptWasmHostContext& Context) const;
 	bool PumpReadyContinuations(FAvidScriptWasmSmokeResult& OutResult);
 	// Host-owned World scheduling for generated instances; does not synthesize a script Tick.

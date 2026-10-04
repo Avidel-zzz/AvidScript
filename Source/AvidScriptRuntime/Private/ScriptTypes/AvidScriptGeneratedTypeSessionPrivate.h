@@ -44,6 +44,9 @@ struct FAvidScriptRuntimeGeneratedTypeInstanceState
 	FAvidScriptGeneratedTypeInstanceRegistration Registration;
 	TSharedPtr<IAvidScriptGeneratedTypeAuthority> Authority;
 	TArray<FAvidScriptGeneratedPreparedTypeRoute> PreparedTypeRoutes;
+	// Native activation actually entered for this UObject, in dispatch order.
+	// Loading a VM alone must not synthesize Actor BeginPlay or subsystem Initialize.
+	TArray<TPair<uint32, uint32>> ActivatedLifecycleRoutes;
 	FAvidScriptContextualExportCall ContinuationCall;
 	TMap<FString, FAvidScriptContextualExportCall> DelegateCalls;
 };

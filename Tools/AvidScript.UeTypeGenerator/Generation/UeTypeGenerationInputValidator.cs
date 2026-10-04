@@ -12,6 +12,10 @@ internal static class UeTypeGenerationInputValidator
             && document.SemanticVersion == SemanticContract.ExceptionFlowSemanticVersion;
         if ((!legacyException && !SemanticContract.IsCurrentOrPrevious(document.SchemaVersion, document.SemanticVersion))
             || document.Diagnostics is null || document.AsyncMethods is null
+            || document.StaticInitialization is not null && !SemanticStaticInitializationValidator.IsValid(document)
+            || !SemanticComposableCapabilityValidator.IsValid(document)
+            || SemanticContract.HasCancellationTokens(document) && !SemanticCancellationTokenValidator.IsValid(document)
+            || SemanticContract.HasAsyncVoidErrorOwner(document) && !SemanticAsyncVoidErrorOwnerValidator.IsValid(document)
             || !SemanticExceptionFlowContractValidator.IsValid(document)
             || !SemanticAsyncInvocationValidator.IsValid(document))
             throw new InvalidOperationException("Semantic artifact has an unsupported version or invalid Task/exception lifetime contract.");
@@ -19,11 +23,11 @@ internal static class UeTypeGenerationInputValidator
         bool syncErrors = document.ExceptionFlows is { Count: > 0 };
         bool asyncErrors = document.AsyncMethods.Any(method => method.ErrorPlan is not null || method.ExceptionPlan is not null);
         var errors = document.Diagnostics.Where(diagnostic => diagnostic.Severity == "error").ToArray();
-        string expectedDiagnostic = syncErrors ? "ASCS3001" : "ASCS5422";
         if ((syncErrors || asyncErrors) && !allowBoundedLanguageErrors
             || document.Succeeded && errors.Length != 0
             || !document.Succeeded && (!allowBoundedLanguageErrors || !(syncErrors || asyncErrors)
-                || errors.Length == 0 || errors.Any(diagnostic => diagnostic.Code != expectedDiagnostic)))
+                || errors.Length == 0 || errors.Any(diagnostic =>
+                    !(syncErrors && diagnostic.Code == "ASCS3001" || asyncErrors && diagnostic.Code == "ASCS5422"))))
             throw new InvalidOperationException("Bounded language errors require a validated exception-flow artifact without unrelated errors.");
 
         // The legacy synchronous exception contract predates the method catalog

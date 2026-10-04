@@ -2268,8 +2268,11 @@ FAvidScriptRuntimeSessionTestSnapshot FAvidScriptRuntimeSession::GetTestSnapshot
 	if (LiveRuntime.IsValid())
 		if (const auto* Heap = LiveRuntime->GetManagedHeapForTesting())
 		{
-			Snapshot.ManagedLiveRoots = Heap->GetStats().LiveRoots;
-			Snapshot.ManagedLiveObjects = Heap->GetStats().LiveObjects;
+			const auto Stats = Heap->GetStats();
+			Snapshot.ManagedLiveRoots = Stats.LiveRoots;
+			Snapshot.ManagedStaticRoots = Stats.StaticRoots;
+			Snapshot.ManagedActiveFrames = Stats.ActiveFrames;
+			Snapshot.ManagedLiveObjects = Stats.LiveObjects;
 		}
 	return Snapshot;
 }
@@ -2844,9 +2847,12 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 				: nullptr);
 	}
 #endif
-	const bool bBegan = CandidateHostContext.InstanceExecutionState
+	bool bBegan = CandidateHostContext.InstanceExecutionState
 		? CandidateRuntime->BeginPlayInContext(CandidateHostContext, BeginPlayResult)
 		: CandidateRuntime->BeginPlay(BeginPlayResult);
+	if (bBegan)
+		bBegan = ReplayGeneratedActivationRoutes(*CandidateRuntime, CandidateHostContext,
+			CandidateGeneratedTypeRoutes, BeginPlayResult);
 #if WITH_DEV_AUTOMATION_TESTS
 	if (CandidateBeginPlayCompletionObserverForTesting)
 	{

@@ -65,6 +65,9 @@ public:
 	static TUniquePtr<FAvidScriptGeneratedTypeRuntimeHost> CreateIsolatedForTesting();
 	void SetReloadFailureAfterInstanceCountForTesting(int32 InstanceCount);
 	FAvidScriptRuntimeSession* GetInstanceSessionForTesting(const UObject& Receiver) const;
+	bool LoadPackageForTesting(const FString& DescriptorPath,
+		TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& OutRegistry,
+		FAvidScriptRuntimeArtifact& OutArtifact, FString& OutError);
 #endif
 
 private:

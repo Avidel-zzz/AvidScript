@@ -358,6 +358,15 @@ FAvidScriptRuntimeSession* FAvidScriptGeneratedTypeRuntimeHost::GetInstanceSessi
 	const auto* Instance = Impl->Instances.Find(FObjectKey(&Receiver));
 	return Instance && Instance->IsValid() ? (*Instance)->Session.Get() : nullptr;
 }
+
+bool FAvidScriptGeneratedTypeRuntimeHost::LoadPackageForTesting(const FString& DescriptorPath,
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& OutRegistry,
+	FAvidScriptRuntimeArtifact& OutArtifact, FString& OutError)
+{
+	// Observe the production loader's verified result without rewriting its
+	// registry, imports or canonical bytes for a backend comparison.
+	return LoadPackageFromDescriptorFile(DescriptorPath, OutRegistry, OutArtifact, OutError);
+}
 #endif
 
 bool FAvidScriptGeneratedTypeRuntimeHost::CanMutateInstances(FString& OutError) const

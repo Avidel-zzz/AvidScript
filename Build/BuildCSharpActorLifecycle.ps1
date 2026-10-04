@@ -3,6 +3,7 @@ param(
     [string]$OutputRoot = "",
     [string]$Configuration = "Release",
     [string]$SourcePath = "",
+    [string]$SourceId = "",
     [string]$ProjectPath = "",
     [string]$ProjectRoot = "",
     [string]$ModuleId = "",
@@ -42,6 +43,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ($PSBoundParameters.ContainsKey('SourceId') -and
+    ([string]::IsNullOrWhiteSpace($SourceId) -or [IO.Path]::IsPathRooted($SourceId) -or
+        $SourceId.Contains('\') -or $SourceId.Split('/') -contains '..' -or
+        @($SourceId.ToCharArray() | Where-Object { [char]::IsControl($_) }).Count -gt 0)) {
+    throw 'SourceId must be a stable forward-slash relative identity without parent traversal.'
+}
 $BuildDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginRoot = Split-Path -Parent $BuildDir
 $ProjectPluginsDir = Split-Path -Parent $PluginRoot
@@ -1343,7 +1350,9 @@ foreach ($Artifact in @(
     }
 }
 
-$SourceId = Convert-ToProjectRelativePath $SourcePath
+if (-not $PSBoundParameters.ContainsKey('SourceId')) {
+    $SourceId = Convert-ToProjectRelativePath $SourcePath
+}
 if ($UsesBindingPackage) {
     if ([string]::IsNullOrWhiteSpace($BindingPackagePath)) {
         $Diagnostics += [ordered]@{
@@ -2658,7 +2667,7 @@ $Manifest = [ordered]@{
     abi_version = 1
     language = "csharp"
     source = [ordered]@{
-        file = Convert-ToProjectRelativePath $SourcePath
+        file = $SourceId
         sha256 = [string]$FrontendModel.source.sha256
         script_type = $SelectedScriptTypeName
         frontend_file = Convert-ToProjectRelativePath $FrontendArtifactPath

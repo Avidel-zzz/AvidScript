@@ -2,6 +2,7 @@
 #include "ScriptTypes/AvidScriptGeneratedTypeAuthority.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
 #include "AvidScriptWasmModuleLayout.h"
+#include "AvidScriptBindingReloadEffect.h"
 #include "UObject/UnrealType.h"
 
 namespace
@@ -180,7 +181,9 @@ EAvidScriptVmTypedHostStatus SetGeneratedScalarProperty(
 		static_cast<FAvidScriptGeneratedPropertyHostContext*>(OpaqueContext);
 	UObject* Receiver = nullptr;
 	if (Context == nullptr || Context->*WriteMember == nullptr
-		|| !ResolveGeneratedPropertyReceiver(*Context, PackedSelf, Receiver))
+		|| !ResolveGeneratedPropertyReceiver(*Context, PackedSelf, Receiver)
+		|| !Context->Runtime->PrepareGeneratedPropertyWrite(PackedSelf, *Receiver,
+			*Context->Property, Context->SetterImportName))
 	{
 		return EAvidScriptVmTypedHostStatus::Rejected;
 	}
@@ -284,6 +287,31 @@ UObject* FAvidScriptWasmRuntimeInstance::ResolveGeneratedTypeReceiver(
 	return Authority ? Authority->ResolveGeneratedTypeReceiver(PackedSelf, TypeOrdinal, Registry) : nullptr;
 }
 
+bool FAvidScriptWasmRuntimeInstance::PrepareGeneratedPropertyWrite(
+	const int64 PackedSelf, UObject& Receiver, FProperty& Property, const FString& ImportName)
+{
+	// Imports belong to the shared VM; its current contextual owner selects the
+	// transaction. Never retain the first instance's journal in an import target.
+	if (!HostContext.HostEffectJournal) return true;
+	FAvidScriptBindingHostEffectPrepareResult Result;
+	if (!IsInGameThread() || !IsContextInvocationActive() || !HostContext.ObjectRegistry
+		|| HostContext.OwnerHandle.ToUInt64() != static_cast<uint64>(PackedSelf))
+	{
+		SetPendingHostImportFailure(TEXT("avidscript"), ImportName,
+			TEXT("Generated candidate property write has no active owner transaction."),
+			TEXT("generated_property_effect_authority"));
+		return false;
+	}
+	if (!HostContext.HostEffectJournal->PrepareReflectedProperty(*HostContext.ObjectRegistry,
+		HostContext.OwnerHandle, Receiver, Property, Result) || !Result.bSucceeded)
+	{
+		SetPendingHostImportFailure(TEXT("avidscript"), ImportName, Result.ErrorDetails,
+			Result.ErrorCategory.IsEmpty() ? TEXT("generated_property_effect_rejected") : *Result.ErrorCategory);
+		return false;
+	}
+	return true;
+}
+
 bool FAvidScriptWasmRuntimeInstance::ResolveGeneratedReceiverType(const int64 PackedSelf,
 	const FAvidScriptGeneratedTypeRegistrySnapshot& Registry, uint32& OutOrdinal)
 {
@@ -363,6 +391,7 @@ bool FAvidScriptWasmRuntimeInstance::ConfigureGeneratedTypeHostBindings(
 			Context->TypeOrdinal = RegistryType.TypeOrdinal;
 			Context->ExpectedClass = RegistryType.Class;
 			Context->Property = Member.Property;
+			Context->SetterImportName = Member.SetterImportName;
 			if (Context->Property == nullptr
 				|| !TryConfigureGeneratedScalarCodec(*Context->Property, *Context))
 			{

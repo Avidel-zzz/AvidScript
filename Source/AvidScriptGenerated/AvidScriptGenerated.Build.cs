@@ -23,6 +23,7 @@ public class AvidScriptGenerated : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new[]
 			{
+				"AvidScriptCore",
 				"AvidScriptRuntime",
 				"Json",
 				"Projects"
@@ -63,9 +64,9 @@ public class AvidScriptGenerated : ModuleRules
 		// An environment-only switch can silently reuse another fixture's defines.
 		CommandLineArguments Arguments = new CommandLineArguments(Environment.GetCommandLineArgs());
 		string TestSuite = Arguments.GetStringOrDefault("-AvidScriptGeneratedTestSuite=", "none");
-		if (TestSuite != "none" && TestSuite != "script_defined_types" && TestSuite != "shared_task" && TestSuite != "async_throw")
+		if (TestSuite != "none" && TestSuite != "script_defined_types" && TestSuite != "shared_task" && TestSuite != "async_throw" && TestSuite != "natural_reload")
 		{
-			throw new BuildException("Unknown -AvidScriptGeneratedTestSuite; expected none, script_defined_types, shared_task or async_throw.");
+			throw new BuildException("Unknown -AvidScriptGeneratedTestSuite; expected none, script_defined_types, shared_task, async_throw or natural_reload.");
 		}
 		if (TestSuite != "none" && !bHasGeneratedTypes)
 		{
@@ -77,6 +78,8 @@ public class AvidScriptGenerated : ModuleRules
 			$"AVIDSCRIPT_WITH_GENERATED_TASK_TESTS={(TestSuite == "shared_task" ? 1 : 0)}");
 		PrivateDefinitions.Add(
 			$"AVIDSCRIPT_WITH_GENERATED_ASYNC_THROW_TESTS={(TestSuite == "async_throw" ? 1 : 0)}");
+		PrivateDefinitions.Add(
+			$"AVIDSCRIPT_WITH_GENERATED_NATURAL_RELOAD_TESTS={(TestSuite == "natural_reload" ? 1 : 0)}");
 	}
 
 	private void StageGeneratedTypeCookPackage(ReadOnlyTargetRules Target)

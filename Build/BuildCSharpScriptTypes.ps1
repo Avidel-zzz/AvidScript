@@ -15,6 +15,9 @@ param(
     [string]$PackageConfiguration = "Development",
     [ValidateSet("disabled", "bounded")]
     [string]$LanguageErrors = "disabled",
+    [string]$LanguageProfile = '',
+    [ValidateSet('auto', 'required', 'disabled')]
+    [string]$CompilerWorkerMode = 'auto',
     [switch]$AsyncExceptionFlow,
     [switch]$DirectAwaitCleanup,
     [switch]$AsyncCancellationFlow,
@@ -39,6 +42,18 @@ $GeneratorProject = Join-Path $PluginRoot "Tools\AvidScript.UeTypeGenerator\Avid
 $GlobalJsonPath = Join-Path $PluginRoot "global.json"
 $DefaultProjectPath = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\AvidScript.ActorLifecycle.csproj"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
+$ToolchainRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AvidScript/Toolchain/GeneratedTypes'
+$ResolvedLanguageProfile = $null
+if ($PSBoundParameters.ContainsKey('LanguageProfile')) {
+    if ([string]::IsNullOrWhiteSpace($LanguageProfile)) { throw 'LanguageProfile cannot be empty.' }
+    foreach ($Option in @('AsyncExceptionFlow', 'DirectAwaitCleanup', 'AsyncCancellationFlow')) {
+        if ($PSBoundParameters.ContainsKey($Option)) { throw "LanguageProfile cannot be combined with $Option." }
+    }
+    if ($PSBoundParameters.ContainsKey('LanguageErrors') -and $LanguageErrors -cne 'bounded') {
+        throw 'Gameplay profile requires bounded language errors.'
+    }
+    $LanguageErrors = 'bounded'
+}
 
 if ($TargetPlatform -ieq "Android" -and -not $HeadlessRelease) {
     throw "Android Generated Type packages require -HeadlessRelease."
@@ -82,7 +97,8 @@ foreach ($RequiredFile in @(
 if ([string]::IsNullOrWhiteSpace($SourceId) -or
     [System.IO.Path]::IsPathRooted($SourceId) -or
     $SourceId.Contains("\") -or
-    $SourceId.Split('/') -contains '..') {
+    $SourceId.Split('/') -contains '..' -or
+    @($SourceId.ToCharArray() | Where-Object { [char]::IsControl($_) }).Count -ne 0) {
     throw "SourceId must be a stable forward-slash relative identity without parent traversal."
 }
 if ($ModuleName -cnotmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
@@ -140,6 +156,25 @@ if ($DotNetVersionExitCode -ne 0 -or $ActualSdkVersion.Trim() -cne $ExpectedSdkV
     throw "C# script type generation requires .NET SDK $ExpectedSdkVersion; actual=$ActualSdkVersion"
 }
 
+$SemanticLanguageOptions = @{
+    AsyncExceptionFlow = $(if ($AsyncExceptionFlow) { 'enabled' } else { 'disabled' })
+    DirectAwaitCleanup = $(if ($DirectAwaitCleanup) { 'enabled' } else { 'disabled' })
+    AsyncCancellationFlow = $(if ($AsyncCancellationFlow) { 'enabled' } else { 'disabled' })
+}
+$RuntimeLanguageOptions = @{
+    LanguageErrors = $LanguageErrors
+    AsyncExceptionFlow = $AsyncExceptionFlow
+    DirectAwaitCleanup = $DirectAwaitCleanup
+    AsyncCancellationFlow = $AsyncCancellationFlow
+}
+if (-not [string]::IsNullOrWhiteSpace($LanguageProfile)) {
+    . (Join-Path $BuildDir 'AvidScriptCSharpLanguageProfile.ps1')
+    $ResolvedLanguageProfile = Resolve-AvidScriptCSharpLanguageProfile -Name $LanguageProfile `
+        -PluginRoot $PluginRoot -DotNetPath $DotNetPath -Configuration $Configuration
+    $SemanticLanguageOptions = @{ LanguageProfile = $LanguageProfile }
+    $RuntimeLanguageOptions = @{ LanguageProfile = $LanguageProfile }
+}
+
 $SourceSha256 = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $RunRoot = Join-Path $ArtifactRoot $SourceSha256
 $FrontendPath = Join-Path $RunRoot "script-types.frontend.json"
@@ -167,9 +202,7 @@ if ($LASTEXITCODE -ne 0) {
     -FrontendPath $FrontendPath `
     -OutputPath $SemanticPath `
     -ExecutableReferenceSourcePath $BindingPackage.ReferenceSourcePath `
-    -AsyncExceptionFlow $(if ($AsyncExceptionFlow) { 'enabled' } else { 'disabled' }) `
-    -DirectAwaitCleanup $(if ($DirectAwaitCleanup) { 'enabled' } else { 'disabled' }) `
-    -AsyncCancellationFlow $(if ($AsyncCancellationFlow) { 'enabled' } else { 'disabled' }) `
+    @SemanticLanguageOptions `
     -Configuration $Configuration
 $SemanticExitCode = $LASTEXITCODE
 if ($SemanticExitCode -ne 0 -and
@@ -178,6 +211,9 @@ if ($SemanticExitCode -ne 0 -and
 }
 
 $Semantic = Get-Content -Raw -LiteralPath $SemanticPath | ConvertFrom-Json
+$ProfileAdmission = if ($null -ne $ResolvedLanguageProfile) {
+    Get-AvidScriptCSharpProfileAdmission -Profile $ResolvedLanguageProfile -SemanticPath $SemanticPath -ModuleId $RuntimeModuleId
+} else { $null }
 $SemanticErrors = @($Semantic.diagnostics | Where-Object { [string]$_.severity -ceq "error" })
 $BoundedSemanticArtifact = $LanguageErrors -ceq "bounded" -and
     $SemanticExitCode -eq 1 -and
@@ -187,12 +223,12 @@ $BoundedSemanticArtifact = $LanguageErrors -ceq "bounded" -and
         @($SemanticErrors | Where-Object { [string]$_.code -cne "ASCS5422" }).Count -eq 0)
 # This is only the CLI exit/diagnostic gate. The type generator validates the
 # exact Semantic version, exception plans and Task lifetimes before publication.
-if ((-not [bool]$Semantic.succeeded -and -not $BoundedSemanticArtifact) -or
+if ((-not [bool]$Semantic.succeeded -and -not $BoundedSemanticArtifact -and $null -eq $ProfileAdmission) -or
     @($Semantic.ue_type_declarations).Count -eq 0) {
     throw "Semantic artifact must be successful or a bounded exception-flow artifact, and contain UE type declarations."
 }
 
-$ToolHome = Join-Path $env:TEMP "AvidScriptUeTypeGenerator"
+$ToolHome = $ToolchainRoot
 $AppData = Join-Path $ToolHome "AppData"
 $LocalAppData = Join-Path $ToolHome "LocalAppData"
 $NuGetPackages = Join-Path $ToolHome "Packages"
@@ -322,12 +358,11 @@ if (-not $SkipRuntimePackage) {
             -OutputRoot $RuntimeOutputRoot `
             -Configuration $Configuration `
             -SourcePath $SourcePath `
+            -SourceId $SourceId `
             -ProjectPath $ProjectPath `
             -ModuleId $RuntimeModuleId `
-            -LanguageErrors $LanguageErrors `
-            -AsyncExceptionFlow:$AsyncExceptionFlow `
-            -DirectAwaitCleanup:$DirectAwaitCleanup `
-            -AsyncCancellationFlow:$AsyncCancellationFlow `
+            -CompilerWorkerMode $CompilerWorkerMode `
+            @RuntimeLanguageOptions `
             -ArtifactStem $RuntimeArtifactStem `
             -ManifestPath $RuntimeManifestPath `
             -BindingPackagePath $BindingPackageManifestPath `
@@ -343,6 +378,13 @@ if (-not $SkipRuntimePackage) {
     }
 
     $RuntimeManifest = Get-Content -Raw -LiteralPath $RuntimeManifestPath | ConvertFrom-Json
+    if ($null -ne $ResolvedLanguageProfile) {
+        $RuntimeReport = Get-Content -Raw -LiteralPath (Join-Path $RuntimeOutputRoot "$RuntimeArtifactStem.csharp.report.json") | ConvertFrom-Json
+        Assert-AvidScriptCSharpProfileIdentity -Expected $ResolvedLanguageProfile.Identity -Actual $RuntimeReport.language_profile
+        if ([string]$RuntimeReport.language_profile_admission.guest_ir_sha256 -cne [string]$ProfileAdmission.guest_ir_sha256) {
+            throw 'ASBI4703: Generated shell and Runtime use different profile source admission.'
+        }
+    }
     if ([int]$RuntimeManifest.schema_version -ne 1 -or
         [string]$RuntimeManifest.module_id -cne $RuntimeModuleId -or
         [string]$RuntimeManifest.language -cne "csharp" -or

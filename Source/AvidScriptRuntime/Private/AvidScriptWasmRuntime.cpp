@@ -5674,6 +5674,13 @@ bool FAvidScriptWasmRuntimeInstance::EndTypedCallbackEpoch(FAvidScriptVmError& O
 	{
 		OutError = MoveTemp(Report);
 	}
+	else if (!bSucceeded)
+	{
+		// A generated boundary may trap after reporting its source error. Keep
+		// the primary VM/Host failure, including its import identity, while also
+		// preserving the independently validated language diagnostic.
+		OutError.Details += FString::Printf(TEXT("\nReported language error: %s"), *Report.Details);
+	}
 	FusedCallbackFrameStack.Pop(EAllowShrinking::No);
 	return bSucceeded;
 }
