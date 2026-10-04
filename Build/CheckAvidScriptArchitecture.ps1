@@ -2403,9 +2403,9 @@ foreach ($RequiredBindingInstrumentationContract in @(
         Add-Violation "binding package instrumentation is missing $RequiredBindingInstrumentationContract"
     }
 }
-if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.4.0")') -or
+if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.5.0")') -or
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
-    Add-Violation 'C# binding artifact must identify the 49.4 schema-v5 object lifecycle and event source surface'
+    Add-Violation 'C# binding artifact must identify the 49.5 schema-v5 lifecycle, event and standard cancellation token surface'
 }
 foreach ($RequiredDescriptorSchemaVersion in 2..23) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion

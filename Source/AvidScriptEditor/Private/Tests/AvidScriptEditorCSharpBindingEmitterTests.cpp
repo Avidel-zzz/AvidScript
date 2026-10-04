@@ -201,12 +201,14 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 	TestTrue(TEXT("Generated facade declares the non-generic delay await pattern"),
 		FirstSource.Contains(TEXT("public readonly struct AvidDelayAwaitable"))
 		&& FirstSource.Contains(TEXT("public AvidDelayAwaitable WithCancellation(AvidCancellationToken token) => default;"))
+		&& FirstSource.Contains(TEXT("public AvidDelayAwaitable WithCancellation(System.Threading.CancellationToken token) => default;"))
 		&& FirstSource.Contains(TEXT("public AvidDelayAwaiter GetAwaiter() => default;"))
 		&& FirstSource.Contains(TEXT("public readonly struct AvidDelayAwaiter : INotifyCompletion"))
 		&& FirstSource.Contains(TEXT("public void GetResult()")));
 	TestTrue(TEXT("Generated facade declares the non-generic object await pattern"),
 		FirstSource.Contains(TEXT("public readonly struct AvidObjectAwaitable"))
 		&& FirstSource.Contains(TEXT("public AvidObjectAwaitable WithCancellation(AvidCancellationToken token) => default;"))
+		&& FirstSource.Contains(TEXT("public AvidObjectAwaitable WithCancellation(System.Threading.CancellationToken token) => default;"))
 		&& FirstSource.Contains(TEXT("public AvidObjectAwaiter GetAwaiter() => default;"))
 		&& FirstSource.Contains(TEXT("public readonly struct AvidObjectAwaiter : INotifyCompletion"))
 		&& FirstSource.Contains(TEXT("public AvidLoadedObject GetResult() => default;")));
@@ -214,6 +216,11 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 		FirstSource.Contains(TEXT("public bool IsCompleted => false;"))
 		&& FirstSource.Contains(TEXT("public void OnCompleted(Action continuation)\n    {\n    }")));
 	TestTrue(TEXT("Generated facade declares an opaque continuation token"), FirstSource.Contains(TEXT("public readonly struct AvidContinuation")));
+	TestTrue(TEXT("Generated outcome awaitable accepts both cancellation token types"),
+		FirstSource.Contains(TEXT("public AvidOutcomeAwaitable<T> WithCancellation(AvidCancellationToken token) => default;"))
+		&& FirstSource.Contains(TEXT("public AvidOutcomeAwaitable<T> WithCancellation(System.Threading.CancellationToken token) => default;")));
+	TestTrue(TEXT("Standard cancellation token conversion is a compiler intrinsic declaration"),
+		FirstSource.Contains(TEXT("[MethodImpl(MethodImplOptions.InternalCall)]\n    public static extern implicit operator System.Threading.CancellationToken(AvidCancellationToken token);")));
 	TestTrue(TEXT("Continuation token storage remains private"), FirstSource.Contains(TEXT("private readonly long Token;")));
 	TestTrue(TEXT("Continuation validity rejects only the zero token"), FirstSource.Contains(TEXT("public bool IsValid => Token != 0;")));
 	TestTrue(TEXT("Continuation cancellation uses the continuation service"), FirstSource.Contains(TEXT("public bool Cancel() => AvidScriptRuntimeNative.ContinuationCancel(Token) != 0;")));

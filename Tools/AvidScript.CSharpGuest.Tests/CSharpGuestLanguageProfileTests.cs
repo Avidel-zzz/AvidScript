@@ -25,6 +25,7 @@ internal static class CSharpGuestLanguageProfileTests
         int count = 0;
         void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException("Gameplay profile: " + message); count++; }
         var profile = CSharpLanguageProfile.Gameplay;
+        CheckUnusedTokenFacade(Check);
         Check(profile.Identity.ContractSha256 == Hash(Encoding.UTF8.GetBytes(profile.CanonicalJson)), "identity covers the canonical policy");
         using (var description = JsonDocument.Parse(profile.DescribeJson()))
             Check(description.RootElement.GetProperty("definition").GetProperty("analysis").EnumerateObject().Count() == 8
@@ -185,6 +186,46 @@ internal static class CSharpGuestLanguageProfileTests
             if (!Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory);
         }
         return count;
+    }
+
+    private static void CheckUnusedTokenFacade(Action<bool, string> check)
+    {
+        const string source = "using System.Runtime.InteropServices; public static class Script { public static int Main() => 0; "
+            + "[UnmanagedCallersOnly(EntryPoint = \"avid_on_begin_play\")] public static void BeginPlay() { } "
+            + "[UnmanagedCallersOnly(EntryPoint = \"avid_on_tick\")] public static void Tick(float deltaSeconds) { } "
+            + "[UnmanagedCallersOnly(EntryPoint = \"avid_on_end_play\")] public static void EndPlay() { } }";
+        const string facade = """
+            using System.Runtime.CompilerServices;
+            namespace AvidScript;
+            public readonly struct AvidCancellationToken {
+                internal readonly long Value;
+                public bool IsValid => Value != 0;
+                [MethodImpl(MethodImplOptions.InternalCall)]
+                public static extern implicit operator System.Threading.CancellationToken(AvidCancellationToken token);
+            }
+            public readonly struct AvidDelayAwaitable {
+                public AvidDelayAwaitable WithCancellation(AvidCancellationToken token) => default;
+                public AvidDelayAwaitable WithCancellation(System.Threading.CancellationToken token) => default;
+            }
+            public readonly struct AvidObjectAwaitable {
+                public AvidObjectAwaitable WithCancellation(AvidCancellationToken token) => default;
+                public AvidObjectAwaitable WithCancellation(System.Threading.CancellationToken token) => default;
+            }
+            public readonly struct AvidOutcomeAwaitable<T> {
+                public AvidOutcomeAwaitable<T> WithCancellation(AvidCancellationToken token) => default;
+                public AvidOutcomeAwaitable<T> WithCancellation(System.Threading.CancellationToken token) => default;
+            }
+            """;
+        var references = new[] { new SemanticReferenceSource(facade, "reference:0:unused-token.cs", true) };
+        var legacy = SemanticAnalyzer.Analyze(source, SourceId, Hash(Encoding.UTF8.GetBytes(source)), references, new SemanticCompilerWorkspace());
+        var profiled = SemanticAnalyzer.Analyze(source, SourceId, Hash(Encoding.UTF8.GetBytes(source)), references,
+            new SemanticCompilerWorkspace(), true, true, true, true, true, true, true, true);
+        check(legacy.Succeeded && profiled.Succeeded && legacy.SchemaVersion == 31 && profiled.SchemaVersion == 31,
+            "unused token facade keeps ordinary source under its original contract");
+        check(!profiled.Types.Any(type => type.Id == "type:global::System.NullReferenceException"),
+            "unused token signatures do not register implicit receiver exception types");
+        check(JsonSerializer.Serialize(legacy) == JsonSerializer.Serialize(profiled),
+            "unused generated token overloads preserve exact ordinary Semantic bytes");
     }
 
     private static void RejectRequests(CompilerWorkerRequest semantic, CompilerWorkerRequest guest, Action<bool, string> check)

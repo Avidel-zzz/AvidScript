@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param([Parameter(Mandatory = $true)][string]$BindingPackagePath,
-    [string]$DotNetPath = (Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'))
+    [string]$DotNetPath = (Join-Path $env:USERPROFILE '.dotnet/dotnet.exe'),
+    [switch]$StandardCancellationTokens)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -90,6 +91,39 @@ try {
         Copy-Item -LiteralPath (Join-Path $PackageRoot $Name) -Destination (Join-Path $LocalRoot $Name)
     }
     $LocalPackage = Join-Path $LocalRoot 'package.json'
+    if ($StandardCancellationTokens) {
+        Check ($Package.emitter_version -ceq '49.5.0') 'standard token test uses the production emitter version'
+        $ConsumerRoot = Join-Path $ProjectRoot 'FacadeConsumer'
+        $null = New-Item -ItemType Directory -Path $ConsumerRoot
+        $ConsumerProject = Join-Path $ConsumerRoot 'FacadeConsumer.csproj'
+        $ProjectXml = [xml]'<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework><EnableDefaultCompileItems>false</EnableDefaultCompileItems><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup><ItemGroup><Compile Include="Consumer.cs" /></ItemGroup></Project>'
+        $ReferenceItem = $ProjectXml.CreateElement('Compile')
+        $ReferenceItem.SetAttribute('Include', (Join-Path $LocalRoot ([string]$Package.files.reference_source)))
+        $null = $ProjectXml.Project.ItemGroup.AppendChild($ReferenceItem)
+        $ProjectXml.Save($ConsumerProject)
+        [IO.File]::WriteAllText((Join-Path $ConsumerRoot 'Consumer.cs'), @'
+using AvidScript;
+using System.Threading;
+public static class Consumer {
+    public static CancellationToken Convert(AvidCancellationToken value) => value;
+    public static void Overloads(AvidDelayAwaitable delay, AvidObjectAwaitable load,
+        AvidOutcomeAwaitable<int> outcome, AvidCancellationToken legacy, CancellationToken token) {
+        _ = delay.WithCancellation(legacy); _ = delay.WithCancellation(token);
+        _ = load.WithCancellation(legacy); _ = load.WithCancellation(token);
+        _ = outcome.WithCancellation(legacy); _ = outcome.WithCancellation(token);
+        _ = delay.WithCancellation(default); _ = load.WithCancellation(default);
+        _ = outcome.WithCancellation(default);
+    }
+}
+'@, $Utf8)
+        # SDK reference packs only: no network packages, SDK installation or CLR execution.
+        $EmptySource = Join-Path $ConsumerRoot 'EmptyNuGetSource'
+        $null = New-Item -ItemType Directory -Path $EmptySource
+        & $DotNetPath restore $ConsumerProject --source $EmptySource --disable-parallel -p:NuGetAudit=false *> (Join-Path $RunRoot 'facade-restore.log')
+        Check ($LASTEXITCODE -eq 0) 'generated facade consumer restores from installed reference packs'
+        & $DotNetPath build $ConsumerProject -c Release --no-restore --disable-build-servers -m:1 -nodeReuse:false -p:UseSharedCompilation=false *> (Join-Path $RunRoot 'facade-build.log')
+        Check ($LASTEXITCODE -eq 0) 'real generated facade compiles conversion and all six cancellation overloads'
+    }
     $SourcePath = Join-Path $ProjectRoot 'Gameplay.cs'
     $ProjectPath = Join-Path $ProjectRoot 'Gameplay.csproj'
     [IO.File]::WriteAllText($ProjectPath, '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>', $Utf8)
@@ -178,10 +212,34 @@ public static class Cache { public static int Value; static Cache() { Value = Sc
     $Repair = BuildCase repaired disabled
     Check ($Repair.semantic_cache.lookup -ceq 'rejected' -and $Repair.compilation_cache.lookup -ceq 'rejected' -and
         $Repair.wasm.sha256 -ceq $Cold.wasm.sha256) 'tampered cache profile metadata is rejected and rebuilt'
-    [IO.File]::WriteAllText($SourcePath, $Source.Replace('AvidCancellationToken token', 'CancellationToken token'), $Utf8)
-    $FacadeGap = BuildCase unsupported-facade disabled @() $false
-    Check ($FacadeGap.result -ceq 'semantic_failed' -and
-        @($FacadeGap.diagnostics | Where-Object code -eq 'CS0029').Count -gt 0) 'generated facade gap retains compiler diagnostics and rejects publication'
+    $StandardSource = $Source.Replace('AvidCancellationToken token', 'CancellationToken token')
+    [IO.File]::WriteAllText($SourcePath, $StandardSource, $Utf8)
+    if ($StandardCancellationTokens) {
+        $Standard = BuildCase standard-cold
+        $StandardIr = ReadJson (Join-Path $ProjectRoot ([string]$Standard.artifacts.guest_ir_file))
+        Check ($null -ne $StandardIr.cancellation_tokens -and
+            @($StandardIr.types | Where-Object id -eq 'type:global::System.Threading.CancellationToken').Count -eq 1 -and
+            $Standard.compiler_worker.stages.semantic.count -eq 1 -and $Standard.compiler_worker.stages.guest.count -eq 1) 'standard token uses typed lowering and the production worker'
+        $StandardWarm = BuildCase standard-warm
+        Check ($StandardWarm.semantic_cache.lookup -ceq 'hit' -and $StandardWarm.compilation_cache.lookup -ceq 'hit' -and
+            $StandardWarm.tool_invocations.frontend -eq 0 -and $StandardWarm.tool_invocations.semantic -eq 0 -and
+            $StandardWarm.tool_invocations.guest_ir -eq 0 -and $StandardWarm.tool_invocations.wasm_backend -eq 0 -and
+            $StandardWarm.wasm.sha256 -ceq $Standard.wasm.sha256) 'standard token caches preserve executable bytes'
+        $StandardPrepared = BuildCase standard-prepared disabled @('-PreparedBuildReportPath', (Join-Path $ProjectRoot 'standard-cold/script.csharp.report.json'))
+        Check ($StandardPrepared.build_reuse.frontend_reused -and $StandardPrepared.build_reuse.semantic_reused -and
+            $StandardPrepared.wasm.sha256 -ceq $Standard.wasm.sha256) 'standard token prepared input retains its exact profile'
+        $null = BuildCase standard-legacy-reject disabled @() $false $false
+        [IO.File]::WriteAllText($SourcePath, $StandardSource.Replace('AvidContinuations.NextTickAsync()',
+            'AvidAssets.LoadObjectAsync("/Engine/EngineResources/DefaultTexture.DefaultTexture")'), $Utf8)
+        $ObjectLoad = BuildCase standard-object-composition-reject disabled @() $false
+        Check ($ObjectLoad.result -ceq 'semantic_failed' -and
+            @($ObjectLoad.diagnostics | Where-Object { $_.code -ceq 'ASBI4701' -and $_.message -like '*ASCG1004*Static source execution*' }).Count -eq 1) 'unsupported object load and static catch composition retains owner diagnosis'
+    }
+    else {
+        $FacadeGap = BuildCase unsupported-facade disabled @() $false
+        Check ($FacadeGap.result -ceq 'semantic_failed' -and
+            @($FacadeGap.diagnostics | Where-Object code -eq 'CS0029').Count -gt 0) 'old generated facade retains compiler diagnostics and rejects publication'
+    }
     $OrdinarySource = @'
 using System.Runtime.InteropServices;
 public static class Script {

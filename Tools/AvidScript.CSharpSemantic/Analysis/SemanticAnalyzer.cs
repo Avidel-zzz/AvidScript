@@ -156,6 +156,8 @@ public static class SemanticAnalyzer
         // so typed catches can accept or exclude the implicit failure normally.
         if (enableAsyncSynchronousExceptions
             && (typeRegistry.HasCancellationTokens
+                    && SemanticComposableCapabilities.UsesTokenValues(
+                        symbols, operationProjection.Methods, asyncProjection.Methods)
                 || asyncProjection.Methods.Any(method => method.Segments.Any(segment =>
                     segment.AwaitSite?.MemberAssignment is not null))
                 || callableProjection.Callables.Any(callable => !callable.IsStatic
