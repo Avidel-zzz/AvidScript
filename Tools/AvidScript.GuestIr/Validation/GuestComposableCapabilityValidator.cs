@@ -12,6 +12,7 @@ internal static class GuestComposableCapabilityValidator
         GuestModule module = context.InputArtifact;
         bool voidOwners = GuestAsyncVoidErrorOwners.IsVersion(module);
         bool staticAsyncValue = GuestComposableCapabilities.IsStaticAsyncValueVersion(module);
+        bool objectCancellation = GuestObjectAwaitCancellation.IsVersion(module);
         GuestCapabilityManifest? manifest = module.CapabilityManifest;
         if (!staticAsyncValue && module.StaticAsyncValueComposition is not null)
             Add("Static async value composition cannot authorize another artifact version.");
@@ -58,7 +59,8 @@ internal static class GuestComposableCapabilityValidator
                     or GuestComposableCapabilities.CancellationIdentity
                     or GuestComposableCapabilities.ExceptionValues
                     or GuestComposableCapabilities.CancellationTokenValue)
-                && !(voidOwners && capability.Id == GuestAsyncVoidErrorOwners.CapabilityId))
+                && !(voidOwners && capability.Id == GuestAsyncVoidErrorOwners.CapabilityId)
+                && !(objectCancellation && capability.Id == GuestObjectAwaitCancellation.CapabilityId))
                 Add("The capability list contains an unknown name or version.");
             if (string.CompareOrdinal(previous, capability.Id) >= 0 || !declared.Add(capability.Id))
                 Add("Capabilities must be unique and ordered by ordinal ID.");
@@ -71,6 +73,7 @@ internal static class GuestComposableCapabilityValidator
         RequirePlan(GuestComposableCapabilities.ExceptionValues, module.ExceptionValues is not null);
         RequirePlan(GuestComposableCapabilities.CancellationTokenValue, module.CancellationTokens is not null);
         RequirePlan(GuestAsyncVoidErrorOwners.CapabilityId, module.AsyncVoidErrorOwners is not null);
+        RequirePlan(GuestObjectAwaitCancellation.CapabilityId, module.ObjectAwaitCancellation is not null);
         if (GuestAsyncVoidErrorOwners.IsCompositionVersion(module)
             && !declared.Contains(GuestComposableCapabilities.StaticStorage)
             && !declared.Contains(GuestComposableCapabilities.CancellationTokenValue))
@@ -92,7 +95,7 @@ internal static class GuestComposableCapabilityValidator
             || declared.Contains(GuestComposableCapabilities.CancellationIdentity)
             || declared.Contains(GuestComposableCapabilities.ExceptionValues)))
             Add("Async readiness, cancellation identity, and exception values require base 29/1.28.");
-        if (!voidOwners && !staticAsyncValue && declared.Contains(GuestComposableCapabilities.CancellationIdentity)
+        if (!voidOwners && !staticAsyncValue && !objectCancellation && declared.Contains(GuestComposableCapabilities.CancellationIdentity)
             && !declared.Contains(GuestComposableCapabilities.AwaitReadiness))
             Add("Cancellation identity requires await readiness.");
 
@@ -101,7 +104,18 @@ internal static class GuestComposableCapabilityValidator
             && declared.Contains(GuestComposableCapabilities.StaticStorage)
             && declared.Contains(GuestComposableCapabilities.CancellationTokenValue);
         bool asynchronousProfile = GuestComposableCapabilities.HasDeclaredAsyncBase29(module)
-            && (voidOwners || (staticAsyncValue ? declared.Count is >= 3 and <= 5 : declared.Count == 5));
+            && (voidOwners || (objectCancellation ? declared.Count is >= 2 and <= 7
+                : staticAsyncValue ? declared.Count is >= 3 and <= 5 : declared.Count == 5));
+        if (objectCancellation && (module.Language != "csharp" || !asynchronousProfile
+            || module.StaticAsyncValueComposition is not null || module.AsyncVoidComposition is not null
+            || !declared.Contains(GuestObjectAwaitCancellation.CapabilityId)
+            || module.ObjectAwaitCancellation is not { } objectPlan
+            || (objectPlan.SourceBaseSchemaVersion == 55) != (module.AsyncVoidErrorOwners is not null)
+            || objectPlan.SourceBaseSchemaVersion == 53 && module.CancellationTokens is null
+            || objectPlan.SourceBaseSchemaVersion is 50 or 52 && module.CancellationTokens is not null
+            || objectPlan.SourceBaseSchemaVersion == 50 && module.ExceptionValues is not null
+            || objectPlan.SourceBaseSchemaVersion == 52 && module.ExceptionValues is not { Bindings.Count: > 0 }))
+            Add("IR39 requires the exact source base, paired object plan, and actual optional token/exception/void plans.");
         if (staticAsyncValue && (module.Language != "csharp" || module.AsyncVoidComposition is not null
             || declared.Contains(GuestAsyncVoidErrorOwners.CapabilityId)))
             Add("IR38 requires its source-backed static/async value composition without async void plans.");
@@ -109,7 +123,7 @@ internal static class GuestComposableCapabilityValidator
             Add("IR 35 requires the exact synchronous static/token pair or the five-capability async base 29 profile.");
         if (baseSchema == 14 && (module.LanguageOutcomeTypes is not null || module.LanguageErrorCatalog is not null)
             || (baseSchema is 17 or 29) && (module.LanguageOutcomeTypes is null
-                || !voidOwners && module.LanguageOutcomeTypes.Count == 0 || module.LanguageErrorCatalog is null))
+                || !voidOwners && !objectCancellation && module.LanguageOutcomeTypes.Count == 0 || module.LanguageErrorCatalog is null))
             Add("The execution base requires its exact language-error outcome and catalog profile.");
         if (baseSchema == 29)
         {

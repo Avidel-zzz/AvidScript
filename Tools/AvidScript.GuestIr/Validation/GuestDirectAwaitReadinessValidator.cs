@@ -22,10 +22,12 @@ internal static class GuestDirectAwaitReadinessValidator
             return;
         }
         if ((identity || GuestAsyncVoidErrorOwners.IsVersion(artifact)
-                || GuestComposableCapabilities.IsStaticAsyncValueVersion(artifact))
+                || GuestComposableCapabilities.IsStaticAsyncValueVersion(artifact)
+                || GuestObjectAwaitCancellation.HasDeclaredExecutionBase(artifact))
             && artifact.DirectAwaitReadiness is null && queryImports.Length == 0)
         {
-            if (GuestComposableCapabilities.IsStaticAsyncValueVersion(artifact)
+            if ((GuestComposableCapabilities.IsStaticAsyncValueVersion(artifact)
+                    || GuestObjectAwaitCancellation.HasDeclaredExecutionBase(artifact))
                 && artifact.Functions.SelectMany(function => function.Blocks).Any(block => block.Instructions.Any(instruction => IsBinding(context, instruction))))
                 Add(context, "A source-bound cancellation await cannot erase its readiness guards.");
             return;

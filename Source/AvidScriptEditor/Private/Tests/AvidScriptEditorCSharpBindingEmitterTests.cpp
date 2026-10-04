@@ -255,6 +255,8 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 		&& FirstSource.Contains(TEXT("internal static extern long ContinuationDelayCancelResumeV1(float delaySeconds, int callbackId);")));
 	TestTrue(TEXT("Generated facade imports async object loading"), FirstSource.Contains(TEXT("EntryPoint = \"continuation_load_object\"")));
 	TestTrue(TEXT("Async object-load import returns a long token"), FirstSource.Contains(TEXT("internal static extern long ContinuationLoadObject(string assetPath, int callbackId);")));
+	TestTrue(TEXT("Object cancellation declares the exact versioned import"), FirstSource.Contains(TEXT("[DllImport(\"avidscript\", EntryPoint = \"avid_continuation_load_object_cancel_resume_v1\")]")));
+	TestTrue(TEXT("Object cancellation preserves path and callback arguments with an i64 token"), FirstSource.Contains(TEXT("internal static extern long ContinuationLoadObjectCancelResumeV1(string assetPath, int callbackId);")));
 	TestTrue(TEXT("Generated facade imports continuation cancellation"), FirstSource.Contains(TEXT("EntryPoint = \"continuation_cancel\"")));
 	TestTrue(TEXT("Continuation cancellation import consumes a long token"), FirstSource.Contains(TEXT("internal static extern int ContinuationCancel(long continuationToken);")));
 	TestTrue(TEXT("Generated facade imports cancellation source creation"),

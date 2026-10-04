@@ -41,6 +41,11 @@ public static class CSharpGuestLowerer
         ArgumentNullException.ThrowIfNull(semanticSha256);
         ArgumentNullException.ThrowIfNull(substitutes);
 
+        if (SemanticObjectAwaitCancellation.IsVersion(document)
+            && CSharpObjectAwaitExecutionContext.Find(document) is null)
+            return Failure(new[] { new GuestDiagnostic("ASCG1032", "error",
+                "Object await cancellation requires its source-owned execution compiler.", null) });
+
         var synchronousAsync = CSharpAsyncSynchronousExecutionContext.Find(document);
         if ((document.SchemaVersion == SemanticContract.AsyncVoidErrorOwnerSchemaVersion
             || document.SemanticVersion == SemanticContract.AsyncVoidErrorOwnerSemanticVersion
@@ -468,7 +473,9 @@ public static class CSharpGuestLowerer
                                 : CSharpAsyncCancellationLowerer.ImplicitPropagationBlock(method, segment.AwaitSite),
                             CSharpGuestIds.Import(document.Callables.Single(callable =>
                                 callable.Import is { Module: "avidscript",
-                                    Name: "avid_continuation_delay_cancel_resume_v1" })
+                                    Name: var producerName }
+                                    && producerName == (segment.AwaitSite.ProducerKind == GuestObjectAwaitCancellation.ProducerKind
+                                        ? GuestObjectAwaitCancellation.ImportName : "avid_continuation_delay_cancel_resume_v1"))
                                 .MethodSymbolId))
                         {
                             Cancellation = cancellationFlow
@@ -862,13 +869,19 @@ public static class CSharpGuestLowerer
 		&& import.Name == "avid_continuation_delay_cancel_resume_v1")
 	{
 		return document.AsyncMethods.Any(method => method.Segments
-			.Any(segment => CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
+			.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+                && CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
 	}
+
+        if (import.Module == GuestObjectAwaitCancellation.ImportModule && import.Name == GuestObjectAwaitCancellation.ImportName)
+            return document.AsyncMethods.Any(method => method.Segments.Any(segment =>
+                segment.AwaitSite?.ProducerKind == GuestObjectAwaitCancellation.ProducerKind
+                    && CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
 		if (import.Module == "env" && import.Name == "continuation_load_object")
 		{
-			return document.AsyncMethods
-				.SelectMany(method => method.Segments)
-				.Any(segment => segment.AwaitSite?.ProducerKind == "object_load");
+			return document.AsyncMethods.Any(method => method.Segments
+                .Any(segment => segment.AwaitSite?.ProducerKind == "object_load"
+                    && !CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
 		}
 		if (import.Module == "env" && import.Name == "continuation_bind_cancel")
 		{

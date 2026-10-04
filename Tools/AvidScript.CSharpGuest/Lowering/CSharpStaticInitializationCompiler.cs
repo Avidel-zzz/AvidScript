@@ -12,21 +12,27 @@ public static class CSharpStaticInitializationCompiler
         out GuestModule? module, out string? error)
     {
         module = null;
+        if (SemanticObjectAwaitCancellation.Has(source) && CSharpObjectAwaitExecutionContext.Find(source) is null)
+            return CSharpObjectAwaitCancellationCompiler.TryLower(source, semanticSha256, out module, out error);
         if (!CSharpStaticSourcePreparation.TryPrepare(source, out var ordinary, out var execution, out error)) return false;
+        var objectContext = CSharpObjectAwaitExecutionContext.Find(source);
+        bool objectComposition = objectContext is not null && SemanticObjectAwaitCancellation.Has(source);
         bool voidComposition = SemanticComposableCapabilities.IsAsyncVoidVersion(source);
         bool staticAsyncValueComposition = SemanticComposableCapabilities.IsStaticAsyncValueVersion(source);
-        bool synchronousTokenComposition = !voidComposition && !staticAsyncValueComposition && SemanticComposableCapabilities.IsVersion(source)
+        bool synchronousTokenComposition = !objectComposition && !voidComposition && !staticAsyncValueComposition && SemanticComposableCapabilities.IsVersion(source)
             && source.AsyncMethods.Count == 0;
-        bool asynchronousTokenComposition = !voidComposition && !staticAsyncValueComposition && SemanticComposableCapabilities.IsVersion(source)
+        bool asynchronousTokenComposition = !objectComposition && !voidComposition && !staticAsyncValueComposition && SemanticComposableCapabilities.IsVersion(source)
             && source.AsyncMethods.Count != 0;
         if (ordinary!.ExceptionFlows is not null
             || !synchronousTokenComposition && SemanticContract.HasAsyncSynchronousExceptions(ordinary))
         {
             if (!CSharpLanguageErrorCompiler.TryLower(ordinary, semanticSha256, out var compilation,
-                    out error, deferComposedValidation: asynchronousTokenComposition || voidComposition || staticAsyncValueComposition)) return false;
+                    out error, deferComposedValidation: objectComposition || asynchronousTokenComposition || voidComposition || staticAsyncValueComposition)) return false;
             GuestModule restored = compilation!.Module with { Provenance = compilation.Module.Provenance with
             { SemanticSchemaVersion = source.SchemaVersion, SemanticVersion = source.SemanticVersion } };
-            if (voidComposition)
+            if (objectComposition)
+                restored = objectContext!.Wrap(restored);
+            else if (voidComposition)
                 restored = CSharpAsyncVoidErrorLowerer.Wrap(source, restored);
             else if (staticAsyncValueComposition)
             {

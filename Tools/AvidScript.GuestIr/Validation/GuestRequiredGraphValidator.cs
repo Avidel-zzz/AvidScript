@@ -24,6 +24,8 @@ internal static class GuestRequiredGraphValidator
         }
 
         GuestProvenance provenance = module.Provenance;
+        if (module.ObjectAwaitCancellation is { } objectAwait
+            && (objectAwait.SourceBaseSemanticVersion is null || objectAwait.AwaitCallbackIds is null)) return false;
         if (module.AsyncVoidErrorOwners is { } voidOwners
             && (voidOwners.Owners is null || voidOwners.Owners.Any(owner => owner is null
                 || HasNull(owner.MethodFunctionId, owner.OwnerLocalId, owner.TypeLocalId, owner.UnhandledBlockId)

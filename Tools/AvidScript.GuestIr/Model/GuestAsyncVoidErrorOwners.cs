@@ -18,13 +18,18 @@ public static class GuestAsyncVoidErrorOwners
 
     public static bool IsVersion(GuestModule module) =>
         module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion
-        || IsCompositionVersion(module);
+        || IsCompositionVersion(module)
+        || GuestObjectAwaitCancellation.IsVersion(module)
+            && module.ObjectAwaitCancellation is { SourceBaseSchemaVersion: SemanticSchemaVersion,
+                SourceBaseSemanticVersion: SemanticVersion } && module.AsyncVoidErrorOwners is not null;
 
     public static bool IsCompositionVersion(GuestModule module) =>
         module.SchemaVersion == CompositionSchemaVersion && module.IrVersion == CompositionIrVersion;
 
     public static bool HasSourceContract(GuestModule module) => IsVersion(module)
-        && module.Language == "csharp" && (IsCompositionVersion(module)
+        && module.Language == "csharp" && (GuestObjectAwaitCancellation.IsVersion(module)
+            ? GuestObjectAwaitCancellation.HasSourceContract(module)
+            : IsCompositionVersion(module)
             ? module.Provenance is { SemanticSchemaVersion: CompositionSemanticSchemaVersion, SemanticVersion: CompositionSemanticVersion }
             : module.Provenance is { SemanticSchemaVersion: SemanticSchemaVersion, SemanticVersion: SemanticVersion });
 }

@@ -64,6 +64,14 @@ public static class CSharpCancellationIdentityCompiler
         return TryUpgradeCore(input, out module, out error);
     }
 
+    internal static bool TryUpgradeForObjectAwait(CSharpObjectAwaitExecutionContext context, GuestModule input,
+        out GuestModule? module, out string? error)
+    {
+        // The context can only be created from a validated Semantic 58 source.
+        // No intermediate is admitted publicly; the final IR 39 is independently checked.
+        return TryUpgradeCore(input, out module, out error);
+    }
+
     private static bool TryUpgradeCore(GuestModule input, out GuestModule? module, out string? error)
     {
         module = null;

@@ -14,13 +14,18 @@ internal static class CSharpAsyncCancellationLowerer
     public static bool NeedsImplicitPropagation(SemanticDocument document,
         SemanticAsyncMethod method, SemanticAsyncSegment segment) =>
         CSharpTaskResultAbi.SupportsCancellation(document) && method.TaskResultTypeId is not null
-        && segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+        && IsDirectProducer(document, method, segment.AwaitSite)
         && segment.Transfer?.CancellationTarget is null;
 
     public static bool IsStatusAware(SemanticDocument document,
         SemanticAsyncMethod method, SemanticAsyncSegment segment) =>
-        segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+        IsDirectProducer(document, method, segment.AwaitSite)
         && (segment.Transfer?.CancellationTarget is >= 0 || NeedsImplicitPropagation(document, method, segment));
+
+    private static bool IsDirectProducer(SemanticDocument document,
+        SemanticAsyncMethod method, SemanticAsyncAwaitSite? site) =>
+        site is not null && (site.ProducerKind is "delay" or "next_tick"
+            || SemanticObjectAwaitCancellation.IsStatusAwareSite(document, method, site));
 
     public static bool HasExceptionStorage(SemanticDocument document, SemanticAsyncMethod method) =>
         method.ExceptionPlan is not null && (!SemanticContract.HasAsyncVoidErrorOwner(document)

@@ -49,7 +49,7 @@ internal static class CSharpTypeLowerer
                 continue;
             }
             if (IsCompilerAsyncScaffoldType(document, type)
-                || (document.SemanticVersion is "1.36" or "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion
+                || (document.SemanticVersion is "1.36" or "1.37" or "1.38" or "1.39" or SemanticContract.CurrentSemanticVersion or SemanticContract.TaskResultSemanticVersion or SemanticContract.TaskLocalSemanticVersion or SemanticContract.TaskAssignmentSemanticVersion or SemanticContract.TaskExistingLocalSemanticVersion or SemanticContract.TaskAliasSemanticVersion or SemanticObjectAwaitCancellation.SemanticVersion
                     && IsOpenGenericType(type.Id, semanticTypes, shapes,
                         new HashSet<string>(StringComparer.Ordinal))))
             {

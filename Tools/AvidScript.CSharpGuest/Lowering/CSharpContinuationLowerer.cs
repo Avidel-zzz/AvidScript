@@ -111,8 +111,9 @@ internal static class CSharpContinuationLowerer
         foreach (CSharpAsyncResumeRoute route in asyncRoutes)
         {
             if (route.CallbackId <= 0
-                || route.StatusAware && route.PayloadKind
-                    != SemanticContinuationCallback.NonePayloadKind
+                || route.StatusAware && route.PayloadKind != SemanticContinuationCallback.NonePayloadKind
+                    && !(route.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind
+                        && CSharpObjectAwaitExecutionContext.Find(document) is not null)
                 || route.PayloadKind is not (
                     SemanticContinuationCallback.NonePayloadKind or
                     SemanticContinuationCallback.ObjectPayloadKind or
@@ -209,13 +210,16 @@ internal static class CSharpContinuationLowerer
 
             string invokeBlockId = callBlockId;
             if (target.IsCompilerAsync
-                && target.PayloadKind == SemanticContinuationCallback.NonePayloadKind)
+                && (target.PayloadKind == SemanticContinuationCallback.NonePayloadKind
+                    || target.StatusAware && target.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind))
             {
                 invokeBlockId = callBlockId + (target.StatusAware
                     ? ":status_accepted" : ":completed");
                 string rejectedBlockId = callBlockId + ":invalid_status";
                 string? cancelledCheckBlockId = target.StatusAware
                     ? callBlockId + ":check_cancelled" : null;
+                string? failedCheckBlockId = target.StatusAware && target.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind
+                    ? callBlockId + ":check_failed" : null;
                 GuestRegister completedStatus = Local(
                     version2, target.CallbackId, "completed_status", int32Type.Id, locals);
                 GuestRegister statusAccepted = Local(
@@ -230,7 +234,16 @@ internal static class CSharpContinuationLowerer
                             new[] { status.Id, completedStatus.Id }, null, "equals", null),
                     },
                     new GuestTerminator("branch_if", statusAccepted.Id,
-                        invokeBlockId, cancelledCheckBlockId ?? rejectedBlockId, null)));
+                        invokeBlockId, failedCheckBlockId ?? cancelledCheckBlockId ?? rejectedBlockId, null)));
+                if (failedCheckBlockId is not null)
+                {
+                    GuestRegister failedStatus = Local(version2, target.CallbackId, "failed_status", int32Type.Id, locals);
+                    GuestRegister failureAccepted = Local(version2, target.CallbackId, "failure_accepted", int32Type.Id, locals);
+                    blocks.Add(new GuestBasicBlock(failedCheckBlockId, new GuestInstruction[] {
+                        new("constant", failedStatus.Id, Array.Empty<string>(), null, null, new GuestConstant("int32", "2")),
+                        new("binary", failureAccepted.Id, new[] { status.Id, failedStatus.Id }, null, "equals", null),
+                    }, new GuestTerminator("branch_if", failureAccepted.Id, invokeBlockId, cancelledCheckBlockId, null)));
+                }
                 if (cancelledCheckBlockId is not null)
                 {
                     GuestRegister cancelledStatus = Local(version2, target.CallbackId,

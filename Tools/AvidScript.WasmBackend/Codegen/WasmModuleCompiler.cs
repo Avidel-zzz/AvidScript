@@ -230,6 +230,8 @@ public static class WasmModuleCompiler
                 payload += $"\nsource_execution={composition.SourceBaseSchemaVersion}/{composition.SourceBaseSemanticVersion}";
             if (GuestComposableCapabilities.IsStaticAsyncValueVersion(module) && module.StaticAsyncValueComposition is { } staticValues)
                 payload += $"\nsource_execution={staticValues.SourceBaseSchemaVersion}/{staticValues.SourceBaseSemanticVersion}";
+            if (GuestObjectAwaitCancellation.IsVersion(module) && module.ObjectAwaitCancellation is { } objectAwait)
+                payload += $"\nsource_execution={objectAwait.SourceBaseSchemaVersion}/{objectAwait.SourceBaseSemanticVersion}";
             if (GuestComposableCapabilities.IsVersion(module) && module.CapabilityManifest is { } manifest)
             {
                 payload += $"\nexecution_base={manifest.ExecutionBaseSchemaVersion}/{manifest.ExecutionBaseIrVersion}";

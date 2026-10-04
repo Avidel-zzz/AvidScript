@@ -6,6 +6,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--object-await-cancellation")
+            {
+                int focused = CSharpGuestObjectAwaitCancellationTests.Run();
+                Console.WriteLine($"AvidScript.CSharpGuest.Tests.ObjectAwaitCancellation: {focused}/{focused} passed");
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--object-await-admission")
             {
                 int focused = CSharpGuestObjectAwaitAdmissionTests.Run();
@@ -326,6 +332,7 @@ internal static class Program
             }
             int count = CSharpGuestLoweringTests.Run()
                 + CSharpGuestObjectAwaitAdmissionTests.Run()
+                + CSharpGuestObjectAwaitCancellationTests.Run()
                 + CSharpGuestAsyncVoidCompositionTests.Run()
                 + CSharpGuestAsyncVoidReloadTests.Run()
                 + CSharpGuestAsyncVoidErrorOwnerTests.Run()

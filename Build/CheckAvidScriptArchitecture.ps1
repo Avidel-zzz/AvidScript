@@ -2403,9 +2403,9 @@ foreach ($RequiredBindingInstrumentationContract in @(
         Add-Violation "binding package instrumentation is missing $RequiredBindingInstrumentationContract"
     }
 }
-if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.5.0")') -or
+if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.6.0")') -or
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
-    Add-Violation 'C# binding artifact must identify the 49.5 schema-v5 lifecycle, event and standard cancellation token surface'
+    Add-Violation 'C# binding artifact must identify the 49.6 schema-v5 lifecycle, event and object cancellation surface'
 }
 foreach ($RequiredDescriptorSchemaVersion in 2..23) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
@@ -3093,6 +3093,7 @@ $AllowedFixedRendererImports = @(
     'avid_continuation_delay_cancel_resume_v1',
     'continuation_cancel',
     'continuation_load_object',
+    'avid_continuation_load_object_cancel_resume_v1',
     'continuation_result_read',
     'continuation_state_store',
     'continuation_state_read',

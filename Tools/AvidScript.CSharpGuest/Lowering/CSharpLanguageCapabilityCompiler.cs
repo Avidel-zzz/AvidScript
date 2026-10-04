@@ -29,10 +29,7 @@ public static class CSharpLanguageCapabilityCompiler
         error = "Unsupported or incomplete language capability source contract.";
         if (!IsRequired(source)) return false;
         if (SemanticObjectAwaitCancellation.IsVersion(source))
-        {
-            error = "Object await cancellation requires the paired Guest execution contract.";
-            return false;
-        }
+            return CSharpObjectAwaitCancellationCompiler.TryLower(source, semanticSha256, out module, out error);
         // Static preparation owns field rewriting and attaches private execution
         // contexts before composing the remaining source capabilities.
         if (source.StaticInitialization is not null)

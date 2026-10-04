@@ -20,11 +20,14 @@ internal static class CSharpStaticSourcePreparation
         bool voidSource = source is not null && SemanticComposableCapabilities.IsAsyncVoidVersion(source)
             && SemanticAsyncVoidErrorOwnerValidator.IsValid(source);
         bool staticAsyncValueSource = source is not null && SemanticComposableCapabilities.IsStaticAsyncValueVersion(source);
+        var objectContext = source is null ? null : CSharpObjectAwaitExecutionContext.Find(source);
+        bool objectSource = source is not null && SemanticObjectAwaitCancellation.Has(source)
+            && objectContext is not null && SemanticObjectAwaitCancellationValidator.IsValid(source);
         bool composedTokenSource = source is not null && SemanticComposableCapabilities.IsVersion(source)
             && SemanticContract.HasCancellationTokens(source)
             && SemanticCancellationTokenValidator.IsValid(source);
         if (source is null || !SemanticStaticInitializationValidator.IsValid(source)
-            || SemanticComposableCapabilities.IsVersion(source) && !composedTokenSource && !voidSource && !staticAsyncValueSource
+            || SemanticComposableCapabilities.IsVersion(source) && !composedTokenSource && !voidSource && !staticAsyncValueSource && !objectSource
             || !source.Succeeded && source.ExceptionFlows is null && !asyncSource
             || source.AsyncMethods.Count != 0 && !asyncSource
             || source.ExceptionFlows?.Any(flow => flow.Blocks is null) == true
@@ -43,10 +46,10 @@ internal static class CSharpStaticSourcePreparation
             // The original Semantic 54 envelope was checked above. Its private
             // token view uses the paired Semantic 53 reader after removing
             // static ownership; the published module retains Semantic 54.
-            SchemaVersion = composedTokenSource && voidSource ? SemanticComposableCapabilities.AsyncVoidSchemaVersion
+            SchemaVersion = objectSource ? source.SchemaVersion : composedTokenSource && voidSource ? SemanticComposableCapabilities.AsyncVoidSchemaVersion
                 : composedTokenSource ? SemanticContract.CancellationTokenSchemaVersion
                 : source.StaticInitialization!.BaseSchemaVersion,
-            SemanticVersion = composedTokenSource && voidSource ? SemanticComposableCapabilities.AsyncVoidSemanticVersion
+            SemanticVersion = objectSource ? source.SemanticVersion : composedTokenSource && voidSource ? SemanticComposableCapabilities.AsyncVoidSemanticVersion
                 : composedTokenSource ? SemanticContract.CancellationTokenSemanticVersion
                 : source.StaticInitialization!.BaseSemanticVersion,
             StaticInitialization = null,
@@ -64,14 +67,16 @@ internal static class CSharpStaticSourcePreparation
                 BranchValue = block.BranchValue is null ? null : WithoutOwner(block.BranchValue),
             }).ToArray() }).ToArray(),
         };
-        if (voidSource && composedTokenSource)
+        if (objectSource || voidSource && composedTokenSource)
             validationView = validationView with { CapabilityManifest = SemanticComposableCapabilities.FromProjectedSource(validationView) };
+        objectContext?.Attach(validationView);
         if (composedTokenSource)
         {
             if (!CSharpCancellationTokenExecutionContext.TryCreate(validationView,
                     out var tokenValidationView, out _))
             { error = "Static/token source has no valid private token execution view."; return false; }
             validationView = tokenValidationView!;
+            objectContext?.Attach(validationView);
         }
         if (source.Callables.Select(item => item.MethodSymbolId).Any(string.IsNullOrWhiteSpace)
             || source.Callables.Select(item => item.MethodSymbolId).Distinct().Count() != source.Callables.Count
@@ -279,10 +284,10 @@ internal static class CSharpStaticSourcePreparation
                 .OrderBy(type => type.Id, StringComparer.Ordinal).ToArray();
         ordinary = source with
         {
-            SchemaVersion = composedTokenSource && voidSource ? SemanticComposableCapabilities.AsyncVoidSchemaVersion
+            SchemaVersion = objectSource ? source.SchemaVersion : composedTokenSource && voidSource ? SemanticComposableCapabilities.AsyncVoidSchemaVersion
                 : composedTokenSource ? SemanticContract.CancellationTokenSchemaVersion
                 : source.StaticInitialization.BaseSchemaVersion,
-            SemanticVersion = composedTokenSource && voidSource ? SemanticComposableCapabilities.AsyncVoidSemanticVersion
+            SemanticVersion = objectSource ? source.SemanticVersion : composedTokenSource && voidSource ? SemanticComposableCapabilities.AsyncVoidSemanticVersion
                 : composedTokenSource ? SemanticContract.CancellationTokenSemanticVersion
                 : source.StaticInitialization.BaseSemanticVersion,
             StaticInitialization = null,
@@ -303,14 +308,16 @@ internal static class CSharpStaticSourcePreparation
         ordinary = ordinary with { Reachability = SemanticReachability.ExpandForExecution(ordinary,
             addedCallables.Select(callable => callable.MethodSymbolId)
                 .Concat(rewrittenAsync.Select(method => method.MethodSymbolId)).ToArray()) };
-        if (voidSource && composedTokenSource)
+        if (objectSource || voidSource && composedTokenSource)
             ordinary = ordinary with { CapabilityManifest = SemanticComposableCapabilities.FromProjectedSource(ordinary) };
+        objectContext?.Attach(ordinary);
         if (composedTokenSource)
         {
             if (!CSharpCancellationTokenExecutionContext.TryCreate(ordinary,
                     out var tokenExecutionView, out _))
             { error = "Static/token source cannot lower its private execution view."; return false; }
             ordinary = tokenExecutionView!;
+            objectContext?.Attach(ordinary);
         }
         execution = new(fields, owners, debugTargets);
         execution.Attach(ordinary!);

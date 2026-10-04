@@ -39,6 +39,8 @@ internal static class CSharpAsyncLowerer
         string? cancelResumeDelayImportId = FindImport(document, "avidscript",
             "avid_continuation_delay_cancel_resume_v1");
         string? objectLoadImportId = FindImport(document, "env", "continuation_load_object");
+        string? cancelResumeObjectLoadImportId = FindImport(document,
+            GuestObjectAwaitCancellation.ImportModule, GuestObjectAwaitCancellation.ImportName);
         string? bindCancellationImportId = FindImport(
             document,
             "env",
@@ -60,10 +62,14 @@ internal static class CSharpAsyncLowerer
             .Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
                 && !CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
         bool needsCancelResumeDelayImport = document.AsyncMethods.Any(method => method.Segments
-            .Any(segment => CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
-        bool needsObjectLoadImport = document.AsyncMethods
-            .SelectMany(method => method.Segments)
-            .Any(segment => segment.AwaitSite?.ProducerKind == "object_load");
+            .Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick"
+                && CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
+        bool needsObjectLoadImport = document.AsyncMethods.Any(method => method.Segments
+            .Any(segment => segment.AwaitSite?.ProducerKind == "object_load"
+                && !CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
+        bool needsCancelResumeObjectLoadImport = document.AsyncMethods.Any(method => method.Segments
+            .Any(segment => segment.AwaitSite?.ProducerKind == "object_load"
+                && CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment)));
         bool needsBindCancellationImport = document.AsyncMethods
             .SelectMany(method => method.Segments)
             .Any(segment => segment.AwaitSite?.CancellationToken is not null);
@@ -75,6 +81,7 @@ internal static class CSharpAsyncLowerer
         if ((needsDelayImport && delayImportId is null)
             || (needsCancelResumeDelayImport && cancelResumeDelayImportId is null)
             || (needsObjectLoadImport && objectLoadImportId is null)
+            || (needsCancelResumeObjectLoadImport && cancelResumeObjectLoadImportId is null)
             || (needsBindCancellationImport && bindCancellationImportId is null)
             || (needsResultReadImport && resultReadImportId is null)
             || (needsStateImports
@@ -133,6 +140,7 @@ internal static class CSharpAsyncLowerer
                         delayImportId,
                         cancelResumeDelayImportId,
                         objectLoadImportId,
+                        cancelResumeObjectLoadImportId,
                         bindCancellationImportId,
                         resultReadImportId,
                         stateStoreImportId,

@@ -1625,6 +1625,65 @@ bool FAvidScriptStaticAsyncValueCatalogTest::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptObjectAwaitCatalogTest,
+    "AvidScript.Runtime.LanguageErrorCatalog.ObjectAwaitCancellationAdmission",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptObjectAwaitCatalogTest::RunTest(const FString& Parameters)
+{
+    using namespace AvidScriptLanguageErrorCatalogTests;
+    const FString Metadata = Json(Document(39));
+    TUniquePtr<FAvidScriptLanguageErrorCatalog> Catalog;
+    FString Error;
+    auto Provenance = [](const TCHAR* Base, const TCHAR* Capabilities) {
+        return VoidOwnerProvenance(Capabilities).Replace(TEXT("guest_ir=36/1.35"), TEXT("guest_ir=39/1.38"))
+            .Replace(TEXT("semantic=55/1.64"), TEXT("semantic=58/1.67")) + TEXT("\nsource_execution=") + Base;
+    };
+    const FString Plain = Provenance(TEXT("50/1.59"), TEXT("async.cancellation_identity@1,async.object_await_cancellation@1"));
+    const FString Named = Provenance(TEXT("52/1.61"), TEXT("async.cancellation_identity@1,async.object_await_cancellation@1,error.exception_values@1"));
+    const FString Token = Provenance(TEXT("53/1.62"), TEXT("async.await_readiness@1,async.cancellation_identity@1,async.object_await_cancellation@1,error.cancellation_token_value@1,managed.static_storage@1"));
+    const FString Void = Provenance(TEXT("55/1.64"), TEXT("async.cancellation_identity@1,async.object_await_cancellation@1,error.async_void_owner@1"));
+    const FString Full = Provenance(TEXT("55/1.64"), TEXT("async.await_readiness@1,async.cancellation_identity@1,async.object_await_cancellation@1,error.async_void_owner@1,error.cancellation_token_value@1,error.exception_values@1,managed.static_storage@1"));
+    for (const FString& Valid : {Plain, Named, Token, Void, Full})
+    {
+        if (!TestTrue(TEXT("IR39 admits exact source-backed optional capabilities"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+            VoidOwnerModule(&Metadata, Valid), ModuleId, Catalog, Error))) { AddError(Error); return false; }
+        TestTrue(TEXT("Object contract preserves Task cancellation and identity"), Catalog->SupportsTaskCancellationError() && Catalog->SupportsTaskCancellationIdentity());
+        TestEqual(TEXT("Token authority follows actual capability"), Catalog->SupportsExceptionCancellationToken(), Valid == Token || Valid == Full);
+        TestEqual(TEXT("Void authority follows actual capability"), Catalog->SupportsAsyncVoidErrorOwner(), Valid == Void || Valid == Full);
+    }
+    for (const FString& Invalid : {
+        Plain.Replace(TEXT("guest_ir=39/1.38"), TEXT("guest_ir=39/1.37")),
+        Plain.Replace(TEXT("guest_ir=39/1.38"), TEXT("guest_ir=38/1.37")),
+        Plain.Replace(TEXT("guest_ir=39/1.38"), TEXT("guest_ir=40/1.39")),
+        Plain.Replace(TEXT("semantic=58/1.67"), TEXT("semantic=57/1.66")),
+        Plain.Replace(TEXT("source_execution=50/1.59"), TEXT("source_execution=50/1.58")),
+        Plain.Replace(TEXT("\nsource_execution=50/1.59"), TEXT("")),
+        Plain.Replace(TEXT("async.cancellation_identity@1,"), TEXT("")),
+        Plain.Replace(TEXT("async.object_await_cancellation@1"), TEXT("async.object_await_cancellation@2")),
+        Plain.Replace(TEXT("async.object_await_cancellation@1"), TEXT("async.object_await_cancellation@1,async.object_await_cancellation@1")),
+        Plain.Replace(TEXT("source_execution=50/1.59"), TEXT("source_execution=52/1.61")),
+        Named.Replace(TEXT("source_execution=52/1.61"), TEXT("source_execution=50/1.59")),
+        Token.Replace(TEXT("error.cancellation_token_value@1,"), TEXT("")),
+        Void.Replace(TEXT("source_execution=55/1.64"), TEXT("source_execution=53/1.62")),
+        Plain.Replace(TEXT("execution_base=29/1.28"), TEXT("execution_base=30/1.29")),
+        Plain.Replace(TEXT("task_local_exception_model=cancellation"), TEXT("task_local_exception_model=none")),
+        Plain + TEXT("\nunknown=1") })
+    {
+        TestFalse(TEXT("IR39 rejects forged, stale and future contracts"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+            VoidOwnerModule(&Metadata, Invalid), ModuleId, Catalog, Error));
+        TestFalse(TEXT("Rejected object contract publishes no catalog"), Catalog != nullptr);
+    }
+    const FString OldMetadata = Json(Document(38));
+    TestFalse(TEXT("Old catalog cannot authorize IR39 bytes"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+        VoidOwnerModule(&OldMetadata, Plain), ModuleId, Catalog, Error));
+    TestFalse(TEXT("Object contract requires its catalog"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+        VoidOwnerModule(nullptr, Plain), ModuleId, Catalog, Error));
+    TestFalse(TEXT("Object contract binds loaded module identity"), FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
+        VoidOwnerModule(&Metadata, Plain), TEXT("other_module"), Catalog, Error));
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAvidScriptAsyncVoidReportTest,
 	"AvidScript.Runtime.LanguageErrorCatalog.AsyncVoidCheckedReport",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

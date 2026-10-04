@@ -287,7 +287,7 @@ internal static class CSharpTaskResultAbi
         GuestRegister? result = context.CreateTemporary(typeId, block);
         if (result is null) return null;
         instructions.Add(new("constant", result.Id, Array.Empty<string>(), null, null,
-            new(typeId == IntTypeId ? "int32" : "int64",
+            new(typeId == IntTypeId || typeId == GuestObjectAwaitCancellation.StatusTypeId ? "int32" : "int64",
                 value.ToString(CultureInfo.InvariantCulture))));
         return result;
     }

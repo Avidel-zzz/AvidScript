@@ -57,7 +57,8 @@ FString ExecutionProfile(const TMap<FString, FString>& Fields)
 	if (Fields.FindRef(TEXT("guest_ir")) == TEXT("35/1.34")
 		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("36/1.35")
 		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("37/1.36")
-		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("38/1.37"))
+		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("38/1.37")
+		|| Fields.FindRef(TEXT("guest_ir")) == TEXT("39/1.38"))
 	{
 		const FString Base = Fields.FindRef(TEXT("execution_base"));
 		return Base == TEXT("29/1.28") ? TEXT("26/1.25") : Base;
@@ -104,6 +105,41 @@ bool ParseProvenance(TConstArrayView<uint8> Payload, TMap<FString, FString>& Out
 		OutFields.Add(MoveTemp(Key), Line.Mid(Separator + 1));
 	}
 	const FString ArtifactProfile = OutFields.FindRef(TEXT("guest_ir"));
+	if (ArtifactProfile.StartsWith(TEXT("39/"), ESearchCase::CaseSensitive))
+	{
+		const FString Raw = OutFields.FindRef(TEXT("capabilities"));
+		if (Raw.IsEmpty() || Raw.StartsWith(TEXT(",")) || Raw.EndsWith(TEXT(","))) return false;
+		TArray<FString> Capabilities;
+		Raw.ParseIntoArray(Capabilities, TEXT(","), false);
+		TSet<FString> Declared;
+		FString Previous;
+		for (const FString& Capability : Capabilities)
+		{
+			if (Previous.Compare(Capability, ESearchCase::CaseSensitive) >= 0
+				|| (Capability != TEXT("async.await_readiness@1") && Capability != TEXT("async.cancellation_identity@1")
+					&& Capability != TEXT("async.object_await_cancellation@1") && Capability != TEXT("error.async_void_owner@1")
+					&& Capability != TEXT("error.cancellation_token_value@1") && Capability != TEXT("error.exception_values@1")
+					&& Capability != TEXT("managed.static_storage@1"))) return false;
+			Declared.Add(Capability);
+			Previous = Capability;
+		}
+		const FString Base = OutFields.FindRef(TEXT("source_execution"));
+		const bool bVoid = Declared.Contains(TEXT("error.async_void_owner@1"));
+		const bool bToken = Declared.Contains(TEXT("error.cancellation_token_value@1"));
+		const bool bException = Declared.Contains(TEXT("error.exception_values@1"));
+		const bool bSource = (Base == TEXT("50/1.59") && !bVoid && !bToken && !bException)
+			|| (Base == TEXT("52/1.61") && !bVoid && !bToken && bException)
+			|| (Base == TEXT("53/1.62") && !bVoid && bToken)
+			|| (Base == TEXT("55/1.64") && bVoid);
+		return ArtifactProfile == TEXT("39/1.38") && OutFields.Num() == 12 && bSource
+			&& Declared.Contains(TEXT("async.object_await_cancellation@1")) && Declared.Contains(TEXT("async.cancellation_identity@1"))
+			&& OutFields.FindRef(TEXT("execution_base")) == TEXT("29/1.28")
+			&& OutFields.FindRef(TEXT("source_language")) == TEXT("csharp") && OutFields.FindRef(TEXT("semantic")) == TEXT("58/1.67")
+			&& OutFields.FindRef(TEXT("task_local_exception_model")) == TEXT("cancellation")
+			&& !OutFields.FindRef(TEXT("module_id")).IsEmpty() && IsSourceId(OutFields.FindRef(TEXT("source_id")))
+			&& IsLowerSha256(OutFields.FindRef(TEXT("source_sha256"))) && IsLowerSha256(OutFields.FindRef(TEXT("frontend_sha256")))
+			&& IsLowerSha256(OutFields.FindRef(TEXT("semantic_sha256")));
+	}
 	if (ArtifactProfile.StartsWith(TEXT("38/"), ESearchCase::CaseSensitive))
 	{
 		const FString Raw = OutFields.FindRef(TEXT("capabilities"));
@@ -312,7 +348,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 		return false;
 	}
 	const FString ArtifactProfile = ProvenanceFields.FindRef(TEXT("guest_ir"));
-	if ((ArtifactProfile == TEXT("35/1.34") || ArtifactProfile == TEXT("36/1.35") || ArtifactProfile == TEXT("37/1.36") || ArtifactProfile == TEXT("38/1.37"))
+	if ((ArtifactProfile == TEXT("35/1.34") || ArtifactProfile == TEXT("36/1.35") || ArtifactProfile == TEXT("37/1.36") || ArtifactProfile == TEXT("38/1.37") || ArtifactProfile == TEXT("39/1.38"))
 		&& (ExpectedModuleId.IsEmpty() || ProvenanceFields.FindRef(TEXT("module_id")) != ExpectedModuleId))
 	{
 		OutError = TEXT("Composed IR provenance module identity does not match the loaded artifact");
@@ -371,7 +407,7 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* Sources = nullptr;
 	if (!CatalogPrivate::Number(*Document, TEXT("schema_version"), 1, 1, SectionVersion)
-		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 38, GuestSchema)
+		|| !CatalogPrivate::Number(*Document, TEXT("guest_ir_schema_version"), 17, 39, GuestSchema)
 		|| !Document->TryGetStringField(TEXT("guest_ir_version"), GuestVersion)
 		|| FString::Printf(TEXT("%d/%s"), GuestSchema, *GuestVersion) != ArtifactProfile
 		|| !Document->TryGetStringField(TEXT("module_id"), ModuleId) || ModuleId != ExpectedModuleId
@@ -399,13 +435,14 @@ bool FAvidScriptLanguageErrorCatalog::ReadFromCanonicalWasm(
 	Candidate->bExceptionCancellationToken = ArtifactProfile == TEXT("34/1.33") || bComposableAsync;
 	const bool bVoidOwners = ArtifactProfile == TEXT("36/1.35") || ArtifactProfile == TEXT("37/1.36");
 	const bool bStaticAsyncValues = ArtifactProfile == TEXT("38/1.37");
+	const bool bObjectAwait = ArtifactProfile == TEXT("39/1.38");
 	TArray<FString> Declared;
-	if (bVoidOwners || bStaticAsyncValues) ProvenanceFields.FindRef(TEXT("capabilities")).ParseIntoArray(Declared, TEXT(","), false);
-	Candidate->bAsyncVoidErrorOwner = bVoidOwners;
-	Candidate->bExceptionCancellationToken |= (bVoidOwners || bStaticAsyncValues) && Declared.Contains(TEXT("error.cancellation_token_value@1"));
+	if (bVoidOwners || bStaticAsyncValues || bObjectAwait) ProvenanceFields.FindRef(TEXT("capabilities")).ParseIntoArray(Declared, TEXT(","), false);
+	Candidate->bAsyncVoidErrorOwner = bVoidOwners || (bObjectAwait && Declared.Contains(TEXT("error.async_void_owner@1")));
+	Candidate->bExceptionCancellationToken |= (bVoidOwners || bStaticAsyncValues || bObjectAwait) && Declared.Contains(TEXT("error.cancellation_token_value@1"));
 	Candidate->bTaskCancellationIdentity = ArtifactProfile == TEXT("32/1.31") || ArtifactProfile == TEXT("33/1.32")
 		|| (!bVoidOwners && Candidate->bExceptionCancellationToken && ProfileSchema == 26)
-		|| ((bVoidOwners || bStaticAsyncValues) && Declared.Contains(TEXT("async.cancellation_identity@1")));
+		|| ((bVoidOwners || bStaticAsyncValues || bObjectAwait) && Declared.Contains(TEXT("async.cancellation_identity@1")));
 	Candidate->TypeIds.Reserve(Types->Num());
 	for (const TSharedPtr<FJsonValue>& Entry : *Types)
 	{

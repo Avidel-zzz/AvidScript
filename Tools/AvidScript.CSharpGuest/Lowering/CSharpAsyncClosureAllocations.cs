@@ -36,8 +36,21 @@ internal static class CSharpAsyncClosureAllocations
                 if (instructions.Count == 0) continue;
                 string target = CSharpGuestIds.AsyncSegmentBlock(method.MethodSymbolId, targetOrdinal);
                 int index = blocks.FindIndex(block => (block.Id == source || block.Id.StartsWith(source + ":", StringComparison.Ordinal))
+                    // Resume entry status/cancellation dispatch is a distinct
+                    // edge with its own lexical transition, not the source CFG.
+                    && !block.Id.StartsWith(source + ":entry", StringComparison.Ordinal)
                     && (block.Terminator.TargetBlockId == target || block.Terminator.FalseTargetBlockId == target));
-                if (index < 0) { context.Add("ASCG1024", "Async closure scope lost its synchronous CFG edge."); return false; }
+                if (index < 0)
+                {
+                    // A projected fault target can exist without a realized
+                    // outcome call in this continuation. Resume cancellation
+                    // already performs its own transition before dispatch.
+                    if (segment.SynchronousExceptionTarget == targetOrdinal
+                        && targetOrdinal != segment.Transfer!.PrimaryTarget
+                        && targetOrdinal != segment.Transfer.SecondaryTarget) continue;
+                    context.Add("ASCG1024", $"Async closure scope lost its synchronous CFG edge {segment.Ordinal}->{targetOrdinal}.");
+                    return false;
+                }
                 string bridge = source + ":$closure:edge:" + targetOrdinal;
                 GuestTerminator previous = blocks[index].Terminator;
                 blocks[index] = blocks[index] with { Terminator = previous with {

@@ -26,15 +26,18 @@ public static class GuestComposableCapabilities
 
     public static bool IsVersion(GuestModule module) =>
         module.SchemaVersion == SchemaVersion && module.IrVersion == IrVersion
-        || GuestAsyncVoidErrorOwners.IsVersion(module) || IsStaticAsyncValueVersion(module);
+        || GuestAsyncVoidErrorOwners.IsVersion(module) || IsStaticAsyncValueVersion(module)
+        || GuestObjectAwaitCancellation.IsVersion(module);
 
     public static int ExpectedSemanticSchema(GuestModule module) =>
-        IsStaticAsyncValueVersion(module) ? StaticAsyncValueSemanticSchemaVersion
+        GuestObjectAwaitCancellation.IsVersion(module) ? GuestObjectAwaitCancellation.SemanticSchemaVersion
+            : IsStaticAsyncValueVersion(module) ? StaticAsyncValueSemanticSchemaVersion
             : GuestAsyncVoidErrorOwners.IsCompositionVersion(module) ? GuestAsyncVoidErrorOwners.CompositionSemanticSchemaVersion
             : GuestAsyncVoidErrorOwners.IsVersion(module) ? GuestAsyncVoidErrorOwners.SemanticSchemaVersion : 54;
 
     public static string ExpectedSemanticVersion(GuestModule module) =>
-        IsStaticAsyncValueVersion(module) ? StaticAsyncValueSemanticVersion
+        GuestObjectAwaitCancellation.IsVersion(module) ? GuestObjectAwaitCancellation.SemanticVersion
+            : IsStaticAsyncValueVersion(module) ? StaticAsyncValueSemanticVersion
             : GuestAsyncVoidErrorOwners.IsCompositionVersion(module) ? GuestAsyncVoidErrorOwners.CompositionSemanticVersion
             : GuestAsyncVoidErrorOwners.IsVersion(module) ? GuestAsyncVoidErrorOwners.SemanticVersion : "1.63";
 
@@ -54,7 +57,9 @@ public static class GuestComposableCapabilities
         && module.Language == "csharp"
         && module.Provenance.SemanticSchemaVersion == ExpectedSemanticSchema(module)
         && module.Provenance.SemanticVersion == ExpectedSemanticVersion(module)
-        && (IsStaticAsyncValueVersion(module)
+        && (GuestObjectAwaitCancellation.IsVersion(module)
+            ? GuestObjectAwaitCancellation.HasDeclaredExecutionBase(module)
+            : IsStaticAsyncValueVersion(module)
             ? Has(module, StaticStorage)
                 && Has(module, CancellationIdentity)
                 && module.StaticStorage is { BaseSchemaVersion: 29, BaseIrVersion: "1.28" }

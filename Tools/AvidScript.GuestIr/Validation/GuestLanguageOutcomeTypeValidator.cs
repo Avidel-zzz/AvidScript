@@ -24,7 +24,8 @@ internal static class GuestLanguageOutcomeTypeValidator
             return;
         }
         if (declarations.Count == 0 && GuestComposableCapabilities.HasDeclaredAsyncBase29(context.InputArtifact)
-            && !GuestAsyncVoidErrorOwners.IsVersion(context.InputArtifact))
+            && !GuestAsyncVoidErrorOwners.IsVersion(context.InputArtifact)
+            && !GuestObjectAwaitCancellation.HasDeclaredExecutionBase(context.InputArtifact))
         {
             context.Add("ASIR1024", "IR 35 async error execution requires a nonempty outcome type list.");
             return;

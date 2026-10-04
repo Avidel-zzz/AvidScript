@@ -53,13 +53,16 @@ internal static class CSharpAsyncCatchValues
         error = null;
         // Existing execution validators check the completed base implementation.
         // This private view never escapes: publication keeps the source contract.
-        var execution = input with { Provenance = input.Provenance with {
+        var objectContext = CSharpObjectAwaitExecutionContext.Find(source);
+        var execution = objectContext is not null ? input : input with { Provenance = input.Provenance with {
             SemanticSchemaVersion = GuestAsyncSynchronousExceptions.SemanticSchemaVersion,
             SemanticVersion = GuestAsyncSynchronousExceptions.SemanticVersion } };
         var tokenContext = CSharpCancellationTokenExecutionContext.Find(source);
         var staticContext = CSharpStaticExecutionContext.Find(source);
         GuestModule? upgraded;
-        if (!(asyncContext is { HasVoidErrorOwners: true }
+        if (!(objectContext is not null
+            ? CSharpCancellationIdentityCompiler.TryUpgradeForObjectAwait(objectContext, execution, out upgraded, out error)
+            : asyncContext is { HasVoidErrorOwners: true }
             ? CSharpCancellationIdentityCompiler.TryUpgradeForVoidOwners(asyncContext, execution, out upgraded, out error)
             : staticContext is not null && tokenContext is null
             ? CSharpCancellationIdentityCompiler.TryUpgradeForStaticAsyncValue(staticContext, execution, out upgraded, out error)
@@ -107,7 +110,7 @@ internal static class CSharpAsyncCatchValues
             IrVersion = GuestExceptionValues.IrVersion,
             Provenance = input.Provenance,
             Functions = functions,
-            ExceptionValues = bindings.Count == 0 && (tokenContext is not null || asyncContext is { HasVoidErrorOwners: true }) ? null
+            ExceptionValues = bindings.Count == 0 && (objectContext is not null || tokenContext is not null || asyncContext is { HasVoidErrorOwners: true }) ? null
                 : new(bindings.OrderBy(binding => binding.FunctionId, StringComparer.Ordinal)
                     .ThenBy(binding => binding.BlockId, StringComparer.Ordinal).ToArray()),
         };

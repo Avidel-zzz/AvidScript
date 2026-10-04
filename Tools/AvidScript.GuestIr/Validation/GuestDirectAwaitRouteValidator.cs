@@ -38,18 +38,21 @@ internal static class GuestDirectAwaitRouteValidator
         int previous = -1;
         foreach (GuestDirectAwaitRoute route in routes)
         {
+            bool objectRoute = route.ProducerKind == GuestObjectAwaitCancellation.ProducerKind
+                && GuestObjectAwaitCancellation.HasDeclaredExecutionBase(module)
+                && module.ObjectAwaitCancellation!.AwaitCallbackIds.Contains(route.CallbackId);
             if (route.CallbackId <= previous || route.CallbackId <= 0
                 || !callbacks.Add(route.CallbackId)
                 || !awaitBlocks.Add(route.AwaitBlockId)
-                || route.ProducerKind is not ("delay" or "next_tick")
+                || !objectRoute && route.ProducerKind is not ("delay" or "next_tick")
                 || route.NormalTargetBlockId == route.CancellationTargetBlockId
                 || (typedCancellationRoutes ? route.Cancellation is null : route.Cancellation is not null)
                 || !context.Imports.TryGetValue(route.ScheduleImportId,
                     out GuestImport? schedule)
                 || schedule.Module != "avidscript"
-                || schedule.Name != "avid_continuation_delay_cancel_resume_v1"
+                || schedule.Name != (objectRoute ? GuestObjectAwaitCancellation.ImportName : "avid_continuation_delay_cancel_resume_v1")
                 || !schedule.ParameterTypeIds.SequenceEqual(new[]
-                    { "type:float32", "type:int32" }, StringComparer.Ordinal)
+                    { objectRoute ? "type:string" : "type:float32", "type:int32" }, StringComparer.Ordinal)
                 || schedule.ReturnTypeId != "type:int64"
                 || schedule.DispatchClass != "semantic"
                 || schedule.OptimizationClass != "none"
@@ -65,9 +68,10 @@ internal static class GuestDirectAwaitRouteValidator
             if (!context.Functions.ContainsKey(route.MethodFunctionId)
                 || !context.Functions.TryGetValue(ResumePrefix + route.CallbackId,
                     out GuestFunction? resume)
-                || resume.Parameters.Count != 2
+                || resume.Parameters.Count != (objectRoute ? 3 : 2)
                 || resume.Parameters[0].TypeId != "type:int64"
-                || resume.Parameters[1].TypeId != "type:int32"
+                || resume.Parameters[1].TypeId != (objectRoute ? GuestObjectAwaitCancellation.StatusTypeId : "type:int32")
+                || objectRoute && resume.Parameters[2].TypeId != GuestObjectAwaitCancellation.LoadedObjectTypeId
                 || resume.EntryBlockId != route.NormalTargetBlockId + ":entry"
                 || !HasStatusRoutes(module, GuestTaskLocalLifetimeValidator.ResolveScopeExitRoutes(module, resume), route, typedCancellationRoutes))
             {
@@ -86,7 +90,7 @@ internal static class GuestDirectAwaitRouteValidator
                 route.NormalTargetBlockId + ":entry:cancel_path:task_created"));
         }
         if (module.Imports.Count(import => import.Module == "avidscript"
-                && import.Name == "avid_continuation_delay_cancel_resume_v1") != (routes.Count > 0 ? 1 : 0)
+                && import.Name == "avid_continuation_delay_cancel_resume_v1") != (routes.Any(route => route.ProducerKind is "delay" or "next_tick") ? 1 : 0)
             || module.Functions.SelectMany(function => function.Blocks)
                 .Any(block => block.Instructions.Any(instruction => instruction.Op == "call"
                     && context.Imports.TryGetValue(instruction.TargetId ?? string.Empty,
@@ -130,6 +134,8 @@ internal static class GuestDirectAwaitRouteValidator
         string entry = route.NormalTargetBlockId + ":entry";
         string normal = entry + ":normal_path";
         string checkCancel = entry + ":cancel_check";
+        bool objectRoute = route.ProducerKind == GuestObjectAwaitCancellation.ProducerKind;
+        string checkFailed = entry + ":failed_check";
         string cancel = entry + ":cancel_path";
         string invalid = entry + ":invalid_status";
         if (!blocks.TryGetValue(entry, out GuestBasicBlock? first)) return false;
@@ -148,7 +154,9 @@ internal static class GuestDirectAwaitRouteValidator
         return blocks.ContainsKey(route.NormalTargetBlockId)
             && blocks.ContainsKey(route.CancellationTargetBlockId)
             && IsStatusBranch(statusBlock, resume.Parameters[1].Id,
-                "1", normal, checkCancel)
+                "1", normal, objectRoute ? checkFailed : checkCancel)
+            && (!objectRoute || blocks.TryGetValue(checkFailed, out GuestBasicBlock? failureCheck)
+                && IsStatusBranch(failureCheck, resume.Parameters[1].Id, "2", normal, checkCancel))
             && blocks.TryGetValue(checkCancel, out GuestBasicBlock? cancellationCheck)
             && IsStatusBranch(cancellationCheck, resume.Parameters[1].Id,
                 "3", cancel, invalid)

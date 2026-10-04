@@ -300,6 +300,7 @@ public static class CSharpLanguageErrorCompiler
         staticContext?.Attach(ordinary);
         asyncContext?.Attach(ordinary);
         tokenContext?.Attach(ordinary);
+        CSharpObjectAwaitExecutionContext.Find(semantic)?.Attach(ordinary);
         GuestFunction[] substitutes = producerIds.OrderBy(id => id, StringComparer.Ordinal)
             .Select(id => CreateProducerSubstitute(id, semantic.Callables.Single(callable =>
                 CSharpGuestIds.Function(callable.MethodSymbolId) == id).ReturnTypeId)).ToArray();

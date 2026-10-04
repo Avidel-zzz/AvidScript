@@ -10,6 +10,7 @@ internal sealed record CSharpAsyncAbi(
     string? DelayImportId,
     string? CancelResumeDelayImportId,
     string? ObjectLoadImportId,
+    string? CancelResumeObjectLoadImportId,
     string? BindCancellationImportId,
     string? ResultReadImportId,
     string? StateStoreImportId,
@@ -122,8 +123,10 @@ internal static class CSharpAsyncCfgLowerer
         bool implicitCancellation = incoming is not null && method.Segments.Any(segment =>
             segment.AwaitSite?.CallbackId == incoming.CallbackId
                 && CSharpAsyncCancellationLowerer.NeedsImplicitPropagation(document, method, segment));
-        bool statusAware = incoming is { ProducerKind: "delay" or "next_tick" }
-            && (incomingTransfer?.CancellationTarget is >= 0 || implicitCancellation);
+        bool statusAware = incoming is not null && method.Segments.Any(segment =>
+            segment.AwaitSite?.CallbackId == incoming.CallbackId
+                && CSharpAsyncCancellationLowerer.IsStatusAware(document, method, segment));
+        bool objectStatusAware = statusAware && incoming?.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind;
         GuestRegister? directStatus = null;
         if (incoming is not null)
         {
@@ -132,7 +135,7 @@ internal static class CSharpAsyncCfgLowerer
                 abi.Int64Type.Id);
             parameters.Add(continuationToken);
         }
-        if (statusAware)
+        if (statusAware && !objectStatusAware)
         {
             directStatus = new GuestRegister(
                 CSharpGuestIds.AsyncResumeParameter(incoming!.CallbackId, "status"),
@@ -141,9 +144,11 @@ internal static class CSharpAsyncCfgLowerer
         }
         if (incoming?.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind)
         {
-            parameters.Add(new GuestRegister(
+            var objectStatus = new GuestRegister(
                 CSharpGuestIds.AsyncResumeParameter(incoming.CallbackId, "status"),
-                abi.StatusType.Id));
+                abi.StatusType.Id);
+            parameters.Add(objectStatus);
+            if (objectStatusAware) directStatus = objectStatus;
             loadedObject = new GuestRegister(
                 CSharpGuestIds.AsyncResumeParameter(incoming.CallbackId, "loaded_object"),
                 abi.LoadedObjectType.Id);
@@ -325,7 +330,7 @@ internal static class CSharpAsyncCfgLowerer
         if (!statusAware)
             CSharpAsyncClosureAllocations.Transition(context, method, incomingSegment,
                 entry.SegmentOrdinal, prefixInstructions);
-        if (incoming?.ResultSymbolId is { } resultSymbol && context.ClosureCells.Has(resultSymbol))
+        if (!statusAware && incoming?.ResultSymbolId is { } resultSymbol && context.ClosureCells.Has(resultSymbol))
         {
             GuestRegister? value = loadedObject ?? outcome;
             if (value is null || !CSharpOperationLowerer.StoreLocal(context, resultSymbol, value, entry.SegmentOrdinal, prefixInstructions)) return false;
@@ -337,7 +342,7 @@ internal static class CSharpAsyncCfgLowerer
                 ? CSharpAsyncCancellationLowerer.ImplicitPropagationBlock(method, incoming!)
                 : FlowBlockId(method, cancellationTarget);
             GuestRegister? completed = CSharpTaskResultAbi.Constant(context,
-                abi.Int32Type.Id, 1, entry.SegmentOrdinal, prefixInstructions);
+                directStatus!.TypeId, 1, entry.SegmentOrdinal, prefixInstructions);
             GuestRegister? isCompleted = context.CreateTemporary(abi.Int32Type.Id,
                 entry.SegmentOrdinal);
             if (completed is null || isCompleted is null) return false;
@@ -347,12 +352,23 @@ internal static class CSharpAsyncCfgLowerer
             string cancellationCheck = functionEntryBlockId + ":cancel_check";
             string cancellationPath = functionEntryBlockId + ":cancel_path";
             string invalidStatus = functionEntryBlockId + ":invalid_status";
+            string failedCheck = functionEntryBlockId + ":failed_check";
             blocks.Add(new(activePrefixBlockId, prefixInstructions,
                 new("branch_if", isCompleted.Id, normalPath,
-                    cancellationCheck, null)));
+                    objectStatusAware ? failedCheck : cancellationCheck, null)));
+            if (objectStatusAware)
+            {
+                List<GuestInstruction> failureCheck = new();
+                GuestRegister? failed = CSharpTaskResultAbi.Constant(context,
+                    directStatus.TypeId, 2, entry.SegmentOrdinal, failureCheck);
+                GuestRegister? isFailed = context.CreateTemporary(abi.Int32Type.Id, entry.SegmentOrdinal);
+                if (failed is null || isFailed is null) return false;
+                failureCheck.Add(new("binary", isFailed.Id, new[] { directStatus.Id, failed.Id }, null, "equals", null));
+                blocks.Add(new(failedCheck, failureCheck, new("branch_if", isFailed.Id, normalPath, cancellationCheck, null)));
+            }
             List<GuestInstruction> check = new();
             GuestRegister? cancelled = CSharpTaskResultAbi.Constant(context,
-                abi.Int32Type.Id, 3, entry.SegmentOrdinal, check);
+                directStatus.TypeId, 3, entry.SegmentOrdinal, check);
             GuestRegister? isCancelled = context.CreateTemporary(abi.Int32Type.Id,
                 entry.SegmentOrdinal);
             if (cancelled is null || isCancelled is null) return false;
@@ -368,6 +384,9 @@ internal static class CSharpAsyncCfgLowerer
                     incoming!, entry.SegmentOrdinal, normalInstructions)) return false;
             CSharpAsyncClosureAllocations.Transition(context, method,
                 incomingSegment, entry.SegmentOrdinal, normalInstructions);
+            if (incoming?.ResultSymbolId is { } normalResult && context.ClosureCells.Has(normalResult)
+                && (loadedObject is null || !CSharpOperationLowerer.StoreLocal(context, normalResult,
+                    loadedObject, entry.SegmentOrdinal, normalInstructions))) return false;
             blocks.Add(new(normalPath, normalInstructions,
                 new("branch", null, firstFlowBlockId, null, null)));
             List<GuestInstruction> cancellationInstructions = new();
@@ -893,7 +912,9 @@ internal static class CSharpAsyncCfgLowerer
                 abi.DelayImportId,
                 abi.CancelResumeDelayImportId,
                 CSharpAsyncCancellationLowerer.IsStatusAware(context.Document, method, segment),
-                abi.ObjectLoadImportId,
+                CSharpAsyncCancellationLowerer.IsStatusAware(context.Document, method, segment)
+                    && awaitSite.ProducerKind == GuestObjectAwaitCancellation.ProducerKind
+                        ? abi.CancelResumeObjectLoadImportId : abi.ObjectLoadImportId,
                 abi.BindCancellationImportId,
                 abi.Int32Type,
                 abi.Int64Type,

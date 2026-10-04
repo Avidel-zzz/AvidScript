@@ -15,6 +15,7 @@ internal static class GuestExceptionValueValidator
         if (GuestComposableCapabilities.IsStaticAsyncValueVersion(artifact)
             && artifact.ExceptionValues is null && !reserved) return;
         if (GuestAsyncVoidErrorOwners.IsVersion(artifact) && artifact.ExceptionValues is null && !reserved) return;
+        if (GuestObjectAwaitCancellation.HasDeclaredExecutionBase(artifact) && artifact.ExceptionValues is null && !reserved) return;
         if (!GuestExceptionValues.IsVersion(artifact) && !composableAsync)
         {
             if (artifact.ExceptionValues is not null || reserved
